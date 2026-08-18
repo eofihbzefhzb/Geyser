@@ -163,11 +163,9 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
                     return;
                 }
                 for (PortalNetherNetServer server : this.netherNetServers) {
-                    server.close();
+                    server.reloadSignaling();
                 }
-                this.netherNetServers.clear();
-                writeStatusFile();
-                startNetherNetServers();
+                writeShardFiles();
                 this.authHeaderFingerprint = confirmedFingerprint;
                 writeStatusFile();
             }

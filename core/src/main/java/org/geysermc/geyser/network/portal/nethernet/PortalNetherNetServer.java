@@ -30,7 +30,7 @@ public final class PortalNetherNetServer implements AutoCloseable {
     private final EventLoopGroup workerGroup = new NioEventLoopGroup(0, new DefaultThreadFactory("GeyserNetherNetChild", true));
     private final GeyserNetherNetServerInitializer initializer;
     private final PeerConnectionFactory peerConnectionFactory;
-    private final NetherNetServerSignaling signaling;
+    private NetherNetServerSignaling signaling;
     private final String configuredNetworkId;
     private Channel channel;
 
@@ -112,6 +112,50 @@ public final class PortalNetherNetServer implements AutoCloseable {
         if (config.debugLogging()) {
             this.geyser.getLogger().info("[proxy-bridge] NetherNet control channel bound through Xbox signaling and local server bootstrap.");
         }
+    }
+
+    /**
+     * Recreates only the signaling channel used to accept new NetherNet
+     * connections, using a fresh Xbox auth header. {@code bossGroup},
+     * {@code workerGroup}, and every already-established player channel
+     * are left untouched, so calling this does not disconnect anyone who
+     * is already connected. Use this instead of {@link #close()} +
+     * re-construction whenever only the auth header has changed.
+     */
+    public synchronized void reloadSignaling() {
+        Channel oldChannel = this.channel;
+        NetherNetServerSignaling oldSignaling = this.signaling;
+
+        NetherNetXboxRpcSignaling rawSignaling = createSignaling(this.geyser, this.config, this.configuredNetworkId);
+        NetherNetServerSignaling newSignaling = config.debugLogging()
+            ? new TracingServerSignaling(this.geyser, rawSignaling)
+            : rawSignaling;
+
+        ServerBootstrap bootstrap = new ServerBootstrap()
+            .group(this.bossGroup, this.workerGroup)
+            .channelFactory(NetherNetChannelFactory.server(this.peerConnectionFactory, newSignaling))
+            .childOption(ChannelOption.TCP_NODELAY, false)
+            .childHandler(this.initializer);
+
+        Channel newChannel;
+        try {
+            newChannel = bootstrap.bind(new InetSocketAddress(0)).syncUninterruptibly().channel();
+        } catch (RuntimeException exception) {
+            // Keep serving on the old signaling channel if the new one fails to bind;
+            // do not tear down anything that was previously working.
+            newSignaling.close();
+            throw exception;
+        }
+
+        this.channel = newChannel;
+        this.signaling = newSignaling;
+
+        if (oldChannel != null) {
+            oldChannel.close().syncUninterruptibly();
+        }
+        oldSignaling.close();
+
+        this.geyser.getLogger().info("[proxy-bridge] NetherNet signaling reloaded, new network ID " + this.signaling.getLocalNetworkId());
     }
 
     @Override
