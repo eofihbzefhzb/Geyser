@@ -13,6 +13,11 @@
         </RollingRandomAccessFile>
     </Appenders>
     <Loggers>
+        <!-- Geyser already logs a concise message for this expected auth-refresh
+             failure (see PortalBridgeBootstrap#reloadSignalingIfAuthChanged); the
+             library's own logger repeats it with a full stacktrace every 2s while
+             the token stays invalid, so silence it here. -->
+        <Logger name="dev.kastle.netty.channel.nethernet.signaling.NetherNetXboxRpcSignaling" level="OFF"/>
         <Root level="INFO" >
             <AppenderRef ref="TerminalConsole"/>
             <AppenderRef ref="File"/>
