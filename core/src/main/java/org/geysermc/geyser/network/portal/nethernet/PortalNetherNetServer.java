@@ -29,7 +29,7 @@ public final class PortalNetherNetServer implements AutoCloseable {
     private final EventLoopGroup bossGroup = new NioEventLoopGroup(1, new DefaultThreadFactory("GeyserNetherNetBoss", true));
     private final EventLoopGroup workerGroup = new NioEventLoopGroup(0, new DefaultThreadFactory("GeyserNetherNetChild", true));
     private final GeyserNetherNetServerInitializer initializer;
-    private final PeerConnectionFactory peerConnectionFactory;
+    private PeerConnectionFactory peerConnectionFactory;
     private NetherNetServerSignaling signaling;
     private final String configuredNetworkId;
     private Channel channel;
@@ -125,15 +125,24 @@ public final class PortalNetherNetServer implements AutoCloseable {
     public synchronized void reloadSignaling() {
         Channel oldChannel = this.channel;
         NetherNetServerSignaling oldSignaling = this.signaling;
+        PeerConnectionFactory oldPeerConnectionFactory = this.peerConnectionFactory;
 
         NetherNetXboxRpcSignaling rawSignaling = createSignaling(this.geyser, this.config, this.configuredNetworkId);
         NetherNetServerSignaling newSignaling = config.debugLogging()
             ? new TracingServerSignaling(this.geyser, rawSignaling)
             : rawSignaling;
 
+        // Use a dedicated PeerConnectionFactory for the new channel instead of the
+        // currently-live instance. If the bind below fails, Netty/the native layer
+        // tears down the failed channel and, with it, whatever PeerConnectionFactory
+        // it was constructed with. Handing it the still-in-use factory would take
+        // down every already-connected/-connecting peer along with the failed
+        // reload attempt.
+        PeerConnectionFactory newPeerConnectionFactory = new PeerConnectionFactory();
+
         ServerBootstrap bootstrap = new ServerBootstrap()
             .group(this.bossGroup, this.workerGroup)
-            .channelFactory(NetherNetChannelFactory.server(this.peerConnectionFactory, newSignaling))
+            .channelFactory(NetherNetChannelFactory.server(newPeerConnectionFactory, newSignaling))
             .childOption(ChannelOption.TCP_NODELAY, false)
             .childHandler(this.initializer);
 
@@ -141,21 +150,32 @@ public final class PortalNetherNetServer implements AutoCloseable {
         try {
             newChannel = bootstrap.bind(new InetSocketAddress(0)).syncUninterruptibly().channel();
         } catch (RuntimeException exception) {
-            // Keep serving on the old signaling channel if the new one fails to bind;
-            // do not tear down anything that was previously working.
+            // Keep serving on the old signaling channel/factory if the new one fails
+            // to bind; do not tear down anything that was previously working.
             newSignaling.close();
+            disposeQuietly(newPeerConnectionFactory);
             throw exception;
         }
 
         this.channel = newChannel;
         this.signaling = newSignaling;
+        this.peerConnectionFactory = newPeerConnectionFactory;
 
         if (oldChannel != null) {
             oldChannel.close().syncUninterruptibly();
         }
         oldSignaling.close();
+        disposeQuietly(oldPeerConnectionFactory);
 
         this.geyser.getLogger().info("[proxy-bridge] NetherNet signaling reloaded, new network ID " + this.signaling.getLocalNetworkId());
+    }
+
+    private static void disposeQuietly(PeerConnectionFactory factory) {
+        try {
+            factory.dispose();
+        } catch (NullPointerException ignored) {
+            // The native handle was never fully initialized.
+        }
     }
 
     @Override
@@ -168,11 +188,7 @@ public final class PortalNetherNetServer implements AutoCloseable {
         this.initializer.close();
         this.workerGroup.shutdownGracefully();
         this.bossGroup.shutdownGracefully();
-        try {
-            this.peerConnectionFactory.dispose();
-        } catch (NullPointerException ignored) {
-            // The native handle was never fully initialized.
-        }
+        disposeQuietly(this.peerConnectionFactory);
     }
 
     public String networkId() {
