@@ -36,6 +36,7 @@ import org.geysermc.geyser.ping.GeyserPingInfo;
 import org.geysermc.geyser.ping.IGeyserPingPassthrough;
 import org.geysermc.geyser.translator.text.MessageTranslator;
 
+import java.net.ConnectException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.file.Files;
@@ -170,8 +171,34 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
                 writeStatusFile();
             }
         } catch (Throwable throwable) {
-            geyser.getLogger().error("[proxy-bridge] Failed to reload NetherNet signaling after Xbox auth refresh.", throwable);
+            ConnectException authFailure = findAuthConnectException(throwable);
+            if (authFailure != null) {
+                // Expected while the cached Xbox token is stale/invalid: this fires every
+                // 2 seconds until the token is fixed, so don't spam a full stacktrace.
+                geyser.getLogger().error("[proxy-bridge] Failed to reload NetherNet signaling: "
+                    + authFailure.getMessage() + " (will keep retrying every 2s until the Xbox auth source is valid)");
+            } else {
+                geyser.getLogger().error("[proxy-bridge] Failed to reload NetherNet signaling after Xbox auth refresh.", throwable);
+            }
         }
+    }
+
+    /**
+     * Walks the cause chain looking for the {@link ConnectException} that
+     * {@code PortalNetherNetServer#reloadSignaling()} throws when the Xbox
+     * signaling handshake rejects the current auth header (e.g. 401). Returns
+     * {@code null} if the failure doesn't match that expected shape, so callers
+     * can fall back to logging the full stacktrace for anything unexpected.
+     */
+    private static @Nullable ConnectException findAuthConnectException(Throwable throwable) {
+        Throwable current = throwable;
+        while (current != null) {
+            if (current instanceof ConnectException connectException) {
+                return connectException;
+            }
+            current = current.getCause();
+        }
+        return null;
     }
 
     private void writeStatusFile() {
