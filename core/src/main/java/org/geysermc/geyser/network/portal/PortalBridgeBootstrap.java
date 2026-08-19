@@ -75,8 +75,14 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
 
     public void start() {
         geyser.getLogger().info("[proxy-bridge] Portal bridge enabled.");
-        if (trustedProxyMatchers.isEmpty()) {
-            geyser.getLogger().warning("[proxy-bridge] No trusted proxy rules are configured for SELF_SIGNED portal ingress.");
+        // trustedProxyIps only matters for a plain-Bedrock proxy relaying into this
+        // Geyser's normal UDP listener. Direct NetherNet ingress is trusted via
+        // GeyserSession#isProxyBridgeIngress(), independent of this list, so an
+        // empty list here does not mean NetherNet ingress is untrusted.
+        if (trustedProxyMatchers.isEmpty() && config.debugLogging()) {
+            geyser.getLogger().info("[proxy-bridge] No trusted proxy rules are configured. "
+                + "This only matters if you relay a plain Bedrock proxy into this Geyser's normal UDP listener; "
+                + "NetherNet ingress trust does not depend on this list.");
         }
 
         if (config.debugLogging()) {
