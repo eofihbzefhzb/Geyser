@@ -127,7 +127,14 @@ public final class PortalNetherNetServer implements AutoCloseable {
         NetherNetServerSignaling oldSignaling = this.signaling;
         PeerConnectionFactory oldPeerConnectionFactory = this.peerConnectionFactory;
 
-        NetherNetXboxRpcSignaling rawSignaling = createSignaling(this.geyser, this.config, this.configuredNetworkId);
+        // Keep the currently active network ID across an auth-refresh reload, even
+        // when no explicit id was configured. Regenerating a random id here would
+        // silently change the identity that MCXboxBroadcast already published to
+        // Xbox and that in-flight joins are using, on every token refresh.
+        String reloadNetworkId = !this.configuredNetworkId.isBlank()
+            ? this.configuredNetworkId
+            : this.signaling.getLocalNetworkId();
+        NetherNetXboxRpcSignaling rawSignaling = createSignaling(this.geyser, this.config, reloadNetworkId);
         NetherNetServerSignaling newSignaling = config.debugLogging()
             ? new TracingServerSignaling(this.geyser, rawSignaling)
             : rawSignaling;

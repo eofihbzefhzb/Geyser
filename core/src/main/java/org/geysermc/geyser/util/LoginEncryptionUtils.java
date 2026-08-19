@@ -170,13 +170,20 @@ public class LoginEncryptionUtils {
             return false;
         }
 
+        // Sessions that came in through Geyser's own NetherNet portal ingress were
+        // already authenticated against Xbox Live during signaling before Geyser
+        // ever saw them, so trust those directly. Do NOT trust "the address looks
+        // like loopback" on its own: a NetherNet WebRTC channel and any ordinary
+        // process on this machine hitting the plain Bedrock UDP port can both
+        // report a loopback address, so that check alone would let any local
+        // process impersonate a player without going through Xbox at all.
+        if (session.isProxyBridgeIngress()) {
+            return true;
+        }
+
         InetSocketAddress address = session.getUpstream().getAddress();
         if (address == null) {
             return false;
-        }
-
-        if (address.getAddress() != null && address.getAddress().isLoopbackAddress()) {
-            return true;
         }
 
         PortalBridgeBootstrap portalBridgeBootstrap = session.getGeyser().getPortalBridgeBootstrap();
