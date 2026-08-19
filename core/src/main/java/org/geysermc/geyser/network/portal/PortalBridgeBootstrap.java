@@ -75,10 +75,7 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
 
     public void start() {
         geyser.getLogger().info("[proxy-bridge] Portal bridge enabled.");
-        // trustedProxyIps only matters for a plain-Bedrock proxy relaying into this
-        // Geyser's normal UDP listener. Direct NetherNet ingress is trusted via
-        // GeyserSession#isProxyBridgeIngress(), independent of this list, so an
-        // empty list here does not mean NetherNet ingress is untrusted.
+        
         if (trustedProxyMatchers.isEmpty() && config.debugLogging()) {
             geyser.getLogger().info("[proxy-bridge] No trusted proxy rules are configured. "
                 + "This only matters if you relay a plain Bedrock proxy into this Geyser's normal UDP listener; "
@@ -89,14 +86,14 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
             geyser.getLogger().info("[proxy-bridge] Trusted proxy rules: " + configuredRules.size());
         }
 
-        if (config.xboxAuthHeader().isBlank() && config.xboxAuthHeaderFile().isBlank()) {
+        if (config.xboxAuthHeader().isBlank() && config.xboxAuthHeaderFiles().isEmpty()) {
             geyser.getLogger().warning("[proxy-bridge] Xbox auth header source is not configured; NetherNet ingress will stay disabled.");
             return;
         }
 
         try {
             startNetherNetServers();
-            this.authHeaderFingerprint = PortalNetherNetServer.authHeaderFingerprint(this.geyser, this.config);
+            this.authHeaderFingerprint = computeCombinedFingerprint();
             startStatusWriter();
         } catch (Throwable throwable) {
             geyser.getLogger().error("[proxy-bridge] Failed to start NetherNet ingress.", throwable);
@@ -151,21 +148,29 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
         this.statusWriterExecutor.scheduleWithFixedDelay(this::reloadSignalingIfAuthChanged, 2, 2, TimeUnit.SECONDS);
     }
 
-    /**
-     * MCXboxBroadcast may refresh the cached Xbox token after Geyser has started.
-     * NetherNet signaling captures the header when its server is constructed, so
-     * recreate only the signaling server when the effective header changes.
-     */
+    private String computeCombinedFingerprint() {
+        StringBuilder combined = new StringBuilder();
+        List<String> files = config.xboxAuthHeaderFiles();
+        if (files.isEmpty()) {
+            combined.append(PortalNetherNetServer.authHeaderFingerprint(this.geyser, this.config, ""));
+        } else {
+            for (String file : files) {
+                combined.append(PortalNetherNetServer.authHeaderFingerprint(this.geyser, this.config, file)).append(";");
+            }
+        }
+        return combined.toString();
+    }
+
     private void reloadSignalingIfAuthChanged() {
         try {
-            String currentFingerprint = PortalNetherNetServer.authHeaderFingerprint(this.geyser, this.config);
+            String currentFingerprint = computeCombinedFingerprint();
             if (currentFingerprint.isBlank() || Objects.equals(currentFingerprint, this.authHeaderFingerprint)) {
                 return;
             }
 
             geyser.getLogger().info("[proxy-bridge] Xbox auth source changed; reloading NetherNet signaling.");
             synchronized (this) {
-                String confirmedFingerprint = PortalNetherNetServer.authHeaderFingerprint(this.geyser, this.config);
+                String confirmedFingerprint = computeCombinedFingerprint();
                 if (confirmedFingerprint.isBlank() || Objects.equals(confirmedFingerprint, this.authHeaderFingerprint)) {
                     return;
                 }
@@ -179,8 +184,6 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
         } catch (Throwable throwable) {
             ConnectException authFailure = findAuthConnectException(throwable);
             if (authFailure != null) {
-                // Expected while the cached Xbox token is stale/invalid: this fires every
-                // 2 seconds until the token is fixed, so don't spam a full stacktrace.
                 geyser.getLogger().error("[proxy-bridge] Failed to reload NetherNet signaling: "
                     + authFailure.getMessage() + " (will keep retrying every 2s until the Xbox auth source is valid)");
             } else {
@@ -189,13 +192,6 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
         }
     }
 
-    /**
-     * Walks the cause chain looking for the {@link ConnectException} that
-     * {@code PortalNetherNetServer#reloadSignaling()} throws when the Xbox
-     * signaling handshake rejects the current auth header (e.g. 401). Returns
-     * {@code null} if the failure doesn't match that expected shape, so callers
-     * can fall back to logging the full stacktrace for anything unexpected.
-     */
     private static @Nullable ConnectException findAuthConnectException(Throwable throwable) {
         Throwable current = throwable;
         while (current != null) {
@@ -284,14 +280,21 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
     private synchronized void startNetherNetServers() {
         this.netherNetServers.clear();
         List<String> persistedNetworkIds = readPersistedNetworkIds();
-        for (int i = 0; i < this.config.shardCount(); i++) {
+        List<String> authFiles = this.config.xboxAuthHeaderFiles();
+        
+        int maxShards = Math.max(this.config.shardCount(), authFiles.size());
+
+        for (int i = 0; i < maxShards; i++) {
             String configuredNetworkId = "";
             if (i == 0 && !this.config.netherNetNetworkId().isBlank()) {
                 configuredNetworkId = this.config.netherNetNetworkId();
             } else if (i < persistedNetworkIds.size()) {
                 configuredNetworkId = persistedNetworkIds.get(i);
             }
-            PortalNetherNetServer server = new PortalNetherNetServer(this.geyser, this.config, configuredNetworkId);
+            
+            String authFile = i < authFiles.size() ? authFiles.get(i) : "";
+            
+            PortalNetherNetServer server = new PortalNetherNetServer(this.geyser, this.config, authFile, configuredNetworkId);
             server.start();
             this.netherNetServers.add(server);
         }

@@ -26,6 +26,7 @@ import java.security.NoSuchAlgorithmException;
 public final class PortalNetherNetServer implements AutoCloseable {
     private final GeyserImpl geyser;
     private final PortalBridgeConfig config;
+    private final String authHeaderFile;
     private final EventLoopGroup bossGroup = new NioEventLoopGroup(1, new DefaultThreadFactory("GeyserNetherNetBoss", true));
     private final EventLoopGroup workerGroup = new NioEventLoopGroup(0, new DefaultThreadFactory("GeyserNetherNetChild", true));
     private final GeyserNetherNetServerInitializer initializer;
@@ -34,54 +35,51 @@ public final class PortalNetherNetServer implements AutoCloseable {
     private final String configuredNetworkId;
     private Channel channel;
 
-    public PortalNetherNetServer(GeyserImpl geyser, PortalBridgeConfig config, String configuredNetworkId) {
+    public PortalNetherNetServer(GeyserImpl geyser, PortalBridgeConfig config, String authHeaderFile, String configuredNetworkId) {
         this.geyser = geyser;
         this.config = config;
+        this.authHeaderFile = authHeaderFile;
         this.configuredNetworkId = configuredNetworkId == null ? "" : configuredNetworkId;
         this.initializer = new GeyserNetherNetServerInitializer(geyser);
         this.peerConnectionFactory = new PeerConnectionFactory();
-        NetherNetXboxRpcSignaling rawSignaling = createSignaling(geyser, config, this.configuredNetworkId);
+        NetherNetXboxRpcSignaling rawSignaling = createSignaling(geyser, config, this.authHeaderFile, this.configuredNetworkId);
         this.signaling = config.debugLogging()
             ? new TracingServerSignaling(geyser, rawSignaling)
             : rawSignaling;
     }
 
-    private static NetherNetXboxRpcSignaling createSignaling(GeyserImpl geyser, PortalBridgeConfig config, String configuredNetworkId) {
-        String authHeader = resolveAuthHeader(geyser, config);
+    private static NetherNetXboxRpcSignaling createSignaling(GeyserImpl geyser, PortalBridgeConfig config, String authHeaderFile, String configuredNetworkId) {
+        String authHeader = resolveAuthHeader(geyser, config, authHeaderFile);
         if (!configuredNetworkId.isBlank()) {
             return new NetherNetXboxRpcSignaling(configuredNetworkId, authHeader);
         }
         return new NetherNetXboxRpcSignaling(authHeader);
     }
 
-    private static String resolveAuthHeader(GeyserImpl geyser, PortalBridgeConfig config) {
-        if (!config.xboxAuthHeader().isBlank()) {
-            return config.xboxAuthHeader();
-        }
-        if (config.xboxAuthHeaderFile().isBlank()) {
+    private static String resolveAuthHeader(GeyserImpl geyser, PortalBridgeConfig config, String authHeaderFile) {
+        if (authHeaderFile == null || authHeaderFile.isBlank()) {
+            if (!config.xboxAuthHeader().isBlank()) {
+                return config.xboxAuthHeader();
+            }
             return "";
         }
 
         try {
-            String json = Files.readString(Path.of(config.xboxAuthHeaderFile()));
+            String json = Files.readString(Path.of(authHeaderFile));
             JsonObject root = JsonParser.parseString(json).getAsJsonObject();
             JsonObject minecraftSession = root.getAsJsonObject("minecraftSession");
             if (minecraftSession != null && minecraftSession.has("authorizationHeader")) {
                 return minecraftSession.get("authorizationHeader").getAsString();
             }
-            geyser.getLogger().warning("[proxy-bridge] minecraftSession.authorizationHeader was not found in " + config.xboxAuthHeaderFile());
+            geyser.getLogger().warning("[proxy-bridge] minecraftSession.authorizationHeader was not found in " + authHeaderFile);
         } catch (Exception exception) {
-            geyser.getLogger().error("[proxy-bridge] Failed to read Xbox auth header file: " + config.xboxAuthHeaderFile(), exception);
+            geyser.getLogger().error("[proxy-bridge] Failed to read Xbox auth header file: " + authHeaderFile, exception);
         }
         return "";
     }
 
-    /**
-     * Returns a non-secret fingerprint of the effective Xbox auth header. This is
-     * intentionally the only value exposed to the reload watcher.
-     */
-    public static String authHeaderFingerprint(GeyserImpl geyser, PortalBridgeConfig config) {
-        String authHeader = resolveAuthHeader(geyser, config);
+    public static String authHeaderFingerprint(GeyserImpl geyser, PortalBridgeConfig config, String authHeaderFile) {
+        String authHeader = resolveAuthHeader(geyser, config, authHeaderFile);
         if (authHeader.isBlank()) {
             return "";
         }
@@ -94,8 +92,6 @@ public final class PortalNetherNetServer implements AutoCloseable {
             }
             return fingerprint.toString();
         } catch (NoSuchAlgorithmException exception) {
-            // SHA-256 is required by every Java runtime, but do not expose the
-            // header if a non-conforming runtime is used.
             return Integer.toHexString(authHeader.hashCode());
         }
     }
@@ -114,37 +110,19 @@ public final class PortalNetherNetServer implements AutoCloseable {
         }
     }
 
-    /**
-     * Recreates only the signaling channel used to accept new NetherNet
-     * connections, using a fresh Xbox auth header. {@code bossGroup},
-     * {@code workerGroup}, and every already-established player channel
-     * are left untouched, so calling this does not disconnect anyone who
-     * is already connected. Use this instead of {@link #close()} +
-     * re-construction whenever only the auth header has changed.
-     */
     public synchronized void reloadSignaling() {
         Channel oldChannel = this.channel;
         NetherNetServerSignaling oldSignaling = this.signaling;
         PeerConnectionFactory oldPeerConnectionFactory = this.peerConnectionFactory;
 
-        // Keep the currently active network ID across an auth-refresh reload, even
-        // when no explicit id was configured. Regenerating a random id here would
-        // silently change the identity that MCXboxBroadcast already published to
-        // Xbox and that in-flight joins are using, on every token refresh.
         String reloadNetworkId = !this.configuredNetworkId.isBlank()
             ? this.configuredNetworkId
             : this.signaling.getLocalNetworkId();
-        NetherNetXboxRpcSignaling rawSignaling = createSignaling(this.geyser, this.config, reloadNetworkId);
+        NetherNetXboxRpcSignaling rawSignaling = createSignaling(this.geyser, this.config, this.authHeaderFile, reloadNetworkId);
         NetherNetServerSignaling newSignaling = config.debugLogging()
             ? new TracingServerSignaling(this.geyser, rawSignaling)
             : rawSignaling;
 
-        // Use a dedicated PeerConnectionFactory for the new channel instead of the
-        // currently-live instance. If the bind below fails, Netty/the native layer
-        // tears down the failed channel and, with it, whatever PeerConnectionFactory
-        // it was constructed with. Handing it the still-in-use factory would take
-        // down every already-connected/-connecting peer along with the failed
-        // reload attempt.
         PeerConnectionFactory newPeerConnectionFactory = new PeerConnectionFactory();
 
         ServerBootstrap bootstrap = new ServerBootstrap()
@@ -157,8 +135,6 @@ public final class PortalNetherNetServer implements AutoCloseable {
         try {
             newChannel = bootstrap.bind(new InetSocketAddress(0)).syncUninterruptibly().channel();
         } catch (RuntimeException exception) {
-            // Keep serving on the old signaling channel/factory if the new one fails
-            // to bind; do not tear down anything that was previously working.
             newSignaling.close();
             disposeQuietly(newPeerConnectionFactory);
             throw exception;
@@ -174,14 +150,13 @@ public final class PortalNetherNetServer implements AutoCloseable {
         oldSignaling.close();
         disposeQuietly(oldPeerConnectionFactory);
 
-        this.geyser.getLogger().info("[proxy-bridge] NetherNet signaling reloaded, new network ID " + this.signaling.getLocalNetworkId());
+        this.geyser.getLogger().info("[proxy-bridge] NetherNet signaling reloaded for " + this.authHeaderFile + ", new network ID " + this.signaling.getLocalNetworkId());
     }
 
     private static void disposeQuietly(PeerConnectionFactory factory) {
         try {
             factory.dispose();
         } catch (NullPointerException ignored) {
-            // The native handle was never fully initialized.
         }
     }
 
@@ -202,10 +177,6 @@ public final class PortalNetherNetServer implements AutoCloseable {
         return this.signaling.getLocalNetworkId();
     }
 
-    /**
-     * Adds stage-only diagnostics around the library signaling callbacks. Signal
-     * bodies are deliberately never logged because they contain SDP/candidates.
-     */
     private static final class TracingServerSignaling implements NetherNetServerSignaling {
         private final GeyserImpl geyser;
         private final NetherNetServerSignaling delegate;

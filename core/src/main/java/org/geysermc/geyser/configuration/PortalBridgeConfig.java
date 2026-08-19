@@ -71,6 +71,11 @@ public final class PortalBridgeConfig {
         If xbox-auth-header is empty, Geyser will read minecraftSession.authorizationHeader from this file at startup.""")
     private String xboxAuthHeaderFile;
 
+    @Comment("""
+        List of paths to MCXboxBroadcast cache files (for multi-account / sub-sessions).
+        Example: [cache/cache.json, cache/cache_Jimmy.json]""")
+    private List<String> xboxAuthHeaderFiles;
+
     public boolean enabled() {
         return enabled;
     }
@@ -97,5 +102,15 @@ public final class PortalBridgeConfig {
 
     public String xboxAuthHeaderFile() {
         return Objects.requireNonNullElse(xboxAuthHeaderFile, "");
+    }
+
+    public List<String> xboxAuthHeaderFiles() {
+        if (xboxAuthHeaderFiles != null && !xboxAuthHeaderFiles.isEmpty()) {
+            return xboxAuthHeaderFiles;
+        }
+        if (xboxAuthHeaderFile != null && !xboxAuthHeaderFile.isBlank()) {
+            return List.of(xboxAuthHeaderFile);
+        }
+        return Collections.emptyList();
     }
 }
