@@ -59,6 +59,18 @@ import java.util.Set;
 import java.util.function.BiConsumer;
 
 public class LoginEncryptionUtils {
+    // OPTIMISATION : Parsing des IPs au démarrage
+    private static final Set<String> TRUSTED_PROXY_IPS = new HashSet<>();
+    static {
+        String configured = System.getProperty("Geyser.ProxyBridgeTrustedIps", "");
+        if (!configured.isBlank()) {
+            Arrays.stream(configured.split(","))
+                    .map(String::trim)
+                    .filter(entry -> !entry.isEmpty())
+                    .forEach(TRUSTED_PROXY_IPS::add);
+        }
+    }
+
     private static boolean HAS_SENT_ENCRYPTION_MESSAGE = false;
 
     public static void encryptPlayerConnection(GeyserSession session, LoginPacket loginPacket) {
@@ -191,18 +203,9 @@ public class LoginEncryptionUtils {
             return true;
         }
 
-        String configured = System.getProperty("Geyser.ProxyBridgeTrustedIps", "");
-        if (configured.isBlank()) {
-            return false;
-        }
-
+        // OPTIMISATION : On utilise le Set préparé au démarrage au lieu de le recalculer.
         String host = address.getAddress() != null ? address.getAddress().getHostAddress() : address.getHostString();
-        Set<String> trustedIps = new HashSet<>();
-        Arrays.stream(configured.split(","))
-                .map(String::trim)
-                .filter(entry -> !entry.isEmpty())
-                .forEach(trustedIps::add);
-        return trustedIps.contains(host);
+        return TRUSTED_PROXY_IPS.contains(host);
     }
 
     public static void buildAndShowLoginWindow(GeyserSession session) {
