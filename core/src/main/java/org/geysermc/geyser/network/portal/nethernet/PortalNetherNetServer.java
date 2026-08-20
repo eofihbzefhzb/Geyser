@@ -166,11 +166,34 @@ public final class PortalNetherNetServer implements AutoCloseable {
             .childOption(ChannelOption.TCP_NODELAY, false)
             .childHandler(this.initializer);
 
-        this.channel = bootstrap.bind(new InetSocketAddress(0)).syncUninterruptibly().channel();
-        this.geyser.getLogger().info("[proxy-bridge] NetherNet ingress started with network ID " + this.signaling.getLocalNetworkId());
+        // Name the shard/account in both the success and failure paths. With several
+        // shards, a bare "401 Unauthorized" from the bind below gives no indication of
+        // WHICH account's token Xbox rejected, and the shards that already bound
+        // successfully have logged an indistinguishable success line.
+        String shardLabel = this.authHeaderFile.isBlank() ? "<config header>" : this.authHeaderFile;
+        try {
+            this.channel = bootstrap.bind(new InetSocketAddress(0)).syncUninterruptibly().channel();
+        } catch (RuntimeException exception) {
+            throw new IllegalStateException("NetherNet ingress failed to bind for auth source " + shardLabel
+                + " (network id " + this.signaling.getLocalNetworkId() + ", token " + shortAuthFingerprint() + ")", exception);
+        }
+        this.geyser.getLogger().info("[proxy-bridge] NetherNet ingress started with network ID " + this.signaling.getLocalNetworkId()
+            + " for auth source " + shardLabel + " (token " + shortAuthFingerprint() + ")");
         if (config.debugLogging()) {
             this.geyser.getLogger().info("[proxy-bridge] NetherNet control channel bound through Xbox signaling and local server bootstrap.");
         }
+    }
+
+    /**
+     * Short, non-secret tag for the token this shard is using, so two shards that are
+     * unintentionally authenticating as the same Xbox account are visible in the log.
+     */
+    private String shortAuthFingerprint() {
+        String fingerprint = authHeaderFingerprint(this.geyser, this.config, this.authHeaderFile);
+        if (fingerprint.isBlank()) {
+            return "EMPTY - no auth header was resolved";
+        }
+        return fingerprint.substring(0, Math.min(8, fingerprint.length()));
     }
 
     /**
