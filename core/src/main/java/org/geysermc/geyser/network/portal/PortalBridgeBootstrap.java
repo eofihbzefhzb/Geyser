@@ -31,6 +31,7 @@ import org.checkerframework.checker.nullness.qual.Nullable;
 import org.geysermc.geyser.GeyserImpl;
 import org.geysermc.geyser.configuration.PortalBridgeConfig;
 import org.geysermc.geyser.network.CIDRMatcher;
+import org.geysermc.geyser.network.portal.nethernet.NetherNetEventLoops;
 import org.geysermc.geyser.network.portal.nethernet.PortalNetherNetServer;
 import org.geysermc.geyser.ping.GeyserPingInfo;
 import org.geysermc.geyser.ping.IGeyserPingPassthrough;
@@ -55,8 +56,7 @@ import java.util.concurrent.TimeUnit;
  */
 public final class PortalBridgeBootstrap implements AutoCloseable {
     private static final String SESSION_STATUS_FILENAME = "portal-session-status.json";
-    private static final String NETWORK_ID_FILENAME = "portal-nethernet-id.txt";
-    private static final String SHARDS_FILENAME = "portal-nethernet-shards.json";
+    /** Geyser's own record of the ids to reuse on restart, so the Xbox identity stays stable. */
     private static final String IDENTITIES_FILENAME = "portal-nethernet-identities.json";
     private final GeyserImpl geyser;
     private final PortalBridgeConfig config;
@@ -66,6 +66,7 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
     private @Nullable ScheduledExecutorService startupRetryExecutor;
     private static final long STARTUP_RETRY_DELAY_SECONDS = 10;
     private final List<PortalNetherNetServer> netherNetServers = new ArrayList<>();
+    private final NetherNetEventLoops eventLoops = new NetherNetEventLoops();
     private volatile String authHeaderFingerprint = "";
     private final java.util.Map<String, String> shardFingerprints = new java.util.concurrent.ConcurrentHashMap<>();
 
@@ -169,6 +170,7 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
         deleteStatusFile();
         deleteShardFiles();
         closeNetherNetServersOnly();
+        this.eventLoops.close();
     }
 
     private void closeNetherNetServersOnly() {
@@ -360,7 +362,7 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
             // waits for that file before doing anything - hung forever even though the
             // primary account was working fine.
             try {
-                PortalNetherNetServer server = new PortalNetherNetServer(this.geyser, this.config, authFile, configuredNetworkId);
+                PortalNetherNetServer server = new PortalNetherNetServer(this.geyser, this.config, this.eventLoops, authFile, configuredNetworkId);
                 server.start();
                 this.netherNetServers.add(server);
                 // Record the token this shard actually started with, so the watcher only
@@ -387,15 +389,19 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
         writeShardFiles();
     }
 
+    /**
+     * Persists the active shard network ids so a restart can rebind the same Xbox identity.
+     * <p>
+     * This used to additionally write {@code portal-nethernet-id.txt} and
+     * {@code portal-nethernet-shards.json}. Nothing ever read either one - the publisher polls
+     * {@code portal-session-status.json} and Geyser itself reads only the identities file - so
+     * they were three copies of the same data with two of them write-only.
+     */
     private void writeShardFiles() {
         try {
             if (this.netherNetServers.isEmpty()) {
                 return;
             }
-
-            Path legacyPath = this.geyser.configDirectory().resolve(NETWORK_ID_FILENAME);
-            Files.createDirectories(legacyPath.getParent());
-            Files.writeString(legacyPath, this.netherNetServers.getFirst().networkId() + System.lineSeparator());
 
             JsonObject root = new JsonObject();
             var shards = new com.google.gson.JsonArray();
@@ -408,10 +414,6 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
             }
             root.add("shards", shards);
 
-            Path shardsPath = this.geyser.configDirectory().resolve(SHARDS_FILENAME);
-            Files.createDirectories(shardsPath.getParent());
-            Files.writeString(shardsPath, root.toString() + System.lineSeparator());
-
             Path identitiesPath = this.geyser.configDirectory().resolve(IDENTITIES_FILENAME);
             Files.createDirectories(identitiesPath.getParent());
             Files.writeString(identitiesPath, root.toString() + System.lineSeparator());
@@ -420,20 +422,19 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
         }
     }
 
+    /**
+     * Removes stale files from older builds that wrote a plain-text id and a separate shard
+     * list. The identities file is deliberately kept: it is what lets a restart reuse the same
+     * Xbox identity instead of publishing a new one.
+     */
     private void deleteShardFiles() {
-        try {
-            Files.deleteIfExists(this.geyser.configDirectory().resolve(NETWORK_ID_FILENAME));
-        } catch (Exception exception) {
-            if (config.debugLogging()) {
-                geyser.getLogger().warning("[proxy-bridge] Failed to remove legacy NetherNet ID file: " + exception.getMessage());
-            }
-        }
-
-        try {
-            Files.deleteIfExists(this.geyser.configDirectory().resolve(SHARDS_FILENAME));
-        } catch (Exception exception) {
-            if (config.debugLogging()) {
-                geyser.getLogger().warning("[proxy-bridge] Failed to remove NetherNet shard file: " + exception.getMessage());
+        for (String stale : new String[] {"portal-nethernet-id.txt", "portal-nethernet-shards.json"}) {
+            try {
+                Files.deleteIfExists(this.geyser.configDirectory().resolve(stale));
+            } catch (Exception exception) {
+                if (config.debugLogging()) {
+                    geyser.getLogger().warning("[proxy-bridge] Failed to remove stale file " + stale + ": " + exception.getMessage());
+                }
             }
         }
     }

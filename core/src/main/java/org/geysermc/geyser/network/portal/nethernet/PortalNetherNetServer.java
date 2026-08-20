@@ -10,9 +10,6 @@ import dev.kastle.webrtc.PeerConnectionFactory;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelOption;
-import io.netty.channel.EventLoopGroup;
-import io.netty.channel.nio.NioEventLoopGroup;
-import io.netty.util.concurrent.DefaultThreadFactory;
 import org.geysermc.geyser.GeyserImpl;
 import org.geysermc.geyser.configuration.PortalBridgeConfig;
 
@@ -27,20 +24,21 @@ public final class PortalNetherNetServer implements AutoCloseable {
     private final GeyserImpl geyser;
     private final PortalBridgeConfig config;
     private final String authHeaderFile;
-    private final EventLoopGroup bossGroup = new NioEventLoopGroup(1, new DefaultThreadFactory("GeyserNetherNetBoss", true));
-    private final EventLoopGroup workerGroup = new NioEventLoopGroup(0, new DefaultThreadFactory("GeyserNetherNetChild", true));
+    private final NetherNetEventLoops eventLoops;
     private final GeyserNetherNetServerInitializer initializer;
     private PeerConnectionFactory peerConnectionFactory;
     private NetherNetServerSignaling signaling;
     private final String configuredNetworkId;
     private Channel channel;
 
-    public PortalNetherNetServer(GeyserImpl geyser, PortalBridgeConfig config, String authHeaderFile, String configuredNetworkId) {
+    public PortalNetherNetServer(GeyserImpl geyser, PortalBridgeConfig config, NetherNetEventLoops eventLoops,
+                                 String authHeaderFile, String configuredNetworkId) {
         this.geyser = geyser;
         this.config = config;
+        this.eventLoops = eventLoops;
         this.authHeaderFile = authHeaderFile == null ? "" : authHeaderFile;
         this.configuredNetworkId = configuredNetworkId == null ? "" : configuredNetworkId;
-        this.initializer = new GeyserNetherNetServerInitializer(geyser);
+        this.initializer = new GeyserNetherNetServerInitializer(geyser, eventLoops.playerGroup());
         this.peerConnectionFactory = new PeerConnectionFactory();
         NetherNetXboxRpcSignaling rawSignaling = createSignaling(geyser, config, this.authHeaderFile, this.configuredNetworkId);
         this.signaling = config.debugLogging()
@@ -161,7 +159,7 @@ public final class PortalNetherNetServer implements AutoCloseable {
 
     public void start() {
         ServerBootstrap bootstrap = new ServerBootstrap()
-            .group(this.bossGroup, this.workerGroup)
+            .group(this.eventLoops.bossGroup(), this.eventLoops.workerGroup())
             .channelFactory(NetherNetChannelFactory.server(this.peerConnectionFactory, this.signaling))
             .childOption(ChannelOption.TCP_NODELAY, false)
             .childHandler(this.initializer);
@@ -208,9 +206,8 @@ public final class PortalNetherNetServer implements AutoCloseable {
 
     /**
      * Recreates only the signaling channel used to accept new NetherNet
-     * connections, using a fresh Xbox auth header. {@code bossGroup},
-     * {@code workerGroup}, and every already-established player channel
-     * are left untouched, so calling this does not disconnect anyone who
+     * connections, using a fresh Xbox auth header. The shared event loop
+     * groups and every already-established player channel are left untouched, so calling this does not disconnect anyone who
      * is already connected. Use this instead of {@link #close()} +
      * re-construction whenever only the auth header has changed.
      */
@@ -240,7 +237,7 @@ public final class PortalNetherNetServer implements AutoCloseable {
         PeerConnectionFactory newPeerConnectionFactory = new PeerConnectionFactory();
 
         ServerBootstrap bootstrap = new ServerBootstrap()
-            .group(this.bossGroup, this.workerGroup)
+            .group(this.eventLoops.bossGroup(), this.eventLoops.workerGroup())
             .channelFactory(NetherNetChannelFactory.server(newPeerConnectionFactory, newSignaling))
             .childOption(ChannelOption.TCP_NODELAY, false)
             .childHandler(this.initializer);
@@ -287,9 +284,7 @@ public final class PortalNetherNetServer implements AutoCloseable {
             this.channel = null;
         }
         this.signaling.close();
-        this.initializer.close();
-        this.workerGroup.shutdownGracefully();
-        this.bossGroup.shutdownGracefully();
+        // The event loop groups are shared between shards and shut down by the bootstrap.
         disposeQuietly(this.peerConnectionFactory);
     }
 

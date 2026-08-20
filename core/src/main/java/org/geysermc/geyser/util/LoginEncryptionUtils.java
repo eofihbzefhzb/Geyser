@@ -53,24 +53,9 @@ import javax.crypto.SecretKey;
 import java.net.InetSocketAddress;
 import java.security.KeyPair;
 import java.security.PublicKey;
-import java.util.Arrays;
-import java.util.HashSet;
-import java.util.Set;
 import java.util.function.BiConsumer;
 
 public class LoginEncryptionUtils {
-    // OPTIMISATION : Parsing des IPs au démarrage
-    private static final Set<String> TRUSTED_PROXY_IPS = new HashSet<>();
-    static {
-        String configured = System.getProperty("Geyser.ProxyBridgeTrustedIps", "");
-        if (!configured.isBlank()) {
-            Arrays.stream(configured.split(","))
-                    .map(String::trim)
-                    .filter(entry -> !entry.isEmpty())
-                    .forEach(TRUSTED_PROXY_IPS::add);
-        }
-    }
-
     private static boolean HAS_SENT_ENCRYPTION_MESSAGE = false;
 
     public static void encryptPlayerConnection(GeyserSession session, LoginPacket loginPacket) {
@@ -198,14 +183,11 @@ public class LoginEncryptionUtils {
             return false;
         }
 
+        // trusted-proxy-ips in config.yml is the single source of truth. A second,
+        // separate list used to be read from the Geyser.ProxyBridgeTrustedIps system
+        // property, which silently competed with the config for the same decision.
         PortalBridgeBootstrap portalBridgeBootstrap = session.getGeyser().getPortalBridgeBootstrap();
-        if (portalBridgeBootstrap != null && portalBridgeBootstrap.isTrustedProxy(address)) {
-            return true;
-        }
-
-        // OPTIMISATION : On utilise le Set préparé au démarrage au lieu de le recalculer.
-        String host = address.getAddress() != null ? address.getAddress().getHostAddress() : address.getHostString();
-        return TRUSTED_PROXY_IPS.contains(host);
+        return portalBridgeBootstrap != null && portalBridgeBootstrap.isTrustedProxy(address);
     }
 
     public static void buildAndShowLoginWindow(GeyserSession session) {

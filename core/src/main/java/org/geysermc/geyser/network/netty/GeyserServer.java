@@ -67,9 +67,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
@@ -120,13 +118,6 @@ public final class GeyserServer {
      */
     private final int broadcastPort;
 
-    /**
-     * Maps the local (loopback) address a RakNet connection is seen coming from to the "real" remote address of the
-     * client it's actually proxying for - e.g. a NetherNet/Xbox client being relayed in over a local RakNet loopback
-     * connection. Populated by whatever is bridging connections in front of this server; empty for direct connections.
-     */
-    private final Map<InetSocketAddress, InetSocketAddress> proxiedAddresses = new ConcurrentHashMap<>();
-
     public GeyserServer(GeyserImpl geyser, int threadCount) {
         this.geyser = geyser;
         this.listenCount = Bootstraps.isReusePortAvailable() ?  Integer.getInteger("Geyser.ListenCount", 1) : 1;
@@ -142,26 +133,6 @@ public final class GeyserServer {
         }
 
         this.broadcastPort = geyser.config().advanced().bedrock().broadcastPort();
-    }
-
-    /**
-     * @return the local-address-to-real-client-address map used by the proxy bridge (e.g. NetherNet relay).
-     * Never null; empty if nothing has registered a proxied address.
-     */
-    public Map<InetSocketAddress, InetSocketAddress> getProxiedAddresses() {
-        return proxiedAddresses;
-    }
-
-    /**
-     * Registers a proxied address mapping so a later {@link org.geysermc.geyser.network.GeyserServerInitializer}
-     * session can be told the real remote address behind a local/loopback RakNet connection.
-     */
-    public void registerProxiedAddress(InetSocketAddress localAddress, InetSocketAddress realAddress) {
-        proxiedAddresses.put(localAddress, realAddress);
-    }
-
-    public void unregisterProxiedAddress(InetSocketAddress localAddress) {
-        proxiedAddresses.remove(localAddress);
     }
 
     public CompletableFuture<Void> bind(InetSocketAddress address) {

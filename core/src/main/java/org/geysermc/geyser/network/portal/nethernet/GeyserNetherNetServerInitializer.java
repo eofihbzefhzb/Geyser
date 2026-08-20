@@ -1,8 +1,7 @@
 package org.geysermc.geyser.network.portal.nethernet;
 
 import io.netty.channel.Channel;
-import io.netty.util.concurrent.DefaultThreadFactory;
-import lombok.Getter;
+import io.netty.channel.EventLoopGroup;
 import org.checkerframework.checker.nullness.qual.NonNull;
 import org.cloudburstmc.protocol.bedrock.BedrockPeer;
 import org.cloudburstmc.protocol.bedrock.BedrockServerSession;
@@ -11,17 +10,17 @@ import org.geysermc.geyser.GeyserImpl;
 import org.geysermc.geyser.network.InvalidPacketHandler;
 import org.geysermc.geyser.network.UpstreamPacketHandler;
 import org.geysermc.geyser.session.GeyserSession;
-import io.netty.channel.DefaultEventLoopGroup;
 
-public final class GeyserNetherNetServerInitializer extends NetherNetBedrockChannelInitializer<BedrockServerSession> implements AutoCloseable {
+public final class GeyserNetherNetServerInitializer extends NetherNetBedrockChannelInitializer<BedrockServerSession> {
     private static final boolean PROXY_BRIDGE_DEBUG = Boolean.parseBoolean(System.getProperty("Geyser.ProxyBridgeDebug", "false"));
 
     private final GeyserImpl geyser;
-    @Getter
-    private final DefaultEventLoopGroup eventLoopGroup = new DefaultEventLoopGroup(0, new DefaultThreadFactory("GeyserNetherNetPlayer", true));
+    /** Shared across all shards; owned and shut down by PortalBridgeBootstrap. */
+    private final EventLoopGroup playerGroup;
 
-    public GeyserNetherNetServerInitializer(GeyserImpl geyser) {
+    public GeyserNetherNetServerInitializer(GeyserImpl geyser, EventLoopGroup playerGroup) {
         this.geyser = geyser;
+        this.playerGroup = playerGroup;
     }
 
     @Override
@@ -38,7 +37,7 @@ public final class GeyserNetherNetServerInitializer extends NetherNetBedrockChan
             }
 
             bedrockServerSession.setLogging(this.geyser.config().debugMode());
-            GeyserSession session = new GeyserSession(this.geyser, bedrockServerSession, this.eventLoopGroup.next());
+            GeyserSession session = new GeyserSession(this.geyser, bedrockServerSession, this.playerGroup.next());
             session.setProxyBridgeIngress(true);
             this.geyser.getLogger().info("[proxy-bridge] NetherNet Bedrock session initialized remote="
                 + bedrockServerSession.getSocketAddress());
@@ -58,10 +57,5 @@ public final class GeyserNetherNetServerInitializer extends NetherNetBedrockChan
                 + throwable.getClass().getSimpleName(), throwable);
             bedrockServerSession.disconnect(throwable.getMessage());
         }
-    }
-
-    @Override
-    public void close() {
-        this.eventLoopGroup.shutdownGracefully();
     }
 }
