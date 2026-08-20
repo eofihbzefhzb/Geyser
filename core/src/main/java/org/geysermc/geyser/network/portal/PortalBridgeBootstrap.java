@@ -353,14 +353,36 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
             }
             
             String authFile = i < authFiles.size() ? authFiles.get(i) : "";
-            
-            PortalNetherNetServer server = new PortalNetherNetServer(this.geyser, this.config, authFile, configuredNetworkId);
-            server.start();
-            this.netherNetServers.add(server);
-            // Record the token this shard actually started with, so the watcher only
-            // reloads it once that specific account's token really changes.
-            this.shardFingerprints.put(authFile,
-                PortalNetherNetServer.authHeaderFingerprint(this.geyser, this.config, authFile));
+
+            // Start shards independently. A single account Xbox rejects must not stop the
+            // shards that DO authenticate: startNetherNetServers() previously threw on the
+            // first failure, so no status file was ever written, and the publisher - which
+            // waits for that file before doing anything - hung forever even though the
+            // primary account was working fine.
+            try {
+                PortalNetherNetServer server = new PortalNetherNetServer(this.geyser, this.config, authFile, configuredNetworkId);
+                server.start();
+                this.netherNetServers.add(server);
+                // Record the token this shard actually started with, so the watcher only
+                // reloads it once that specific account's token really changes.
+                this.shardFingerprints.put(authFile,
+                    PortalNetherNetServer.authHeaderFingerprint(this.geyser, this.config, authFile));
+            } catch (Throwable throwable) {
+                ConnectException authFailure = findAuthConnectException(throwable);
+                geyser.getLogger().error("[proxy-bridge] Shard " + (i + 1) + " could not start for auth source "
+                    + (authFile.isBlank() ? "<config header>" : authFile) + ": "
+                    + (authFailure != null ? authFailure.getMessage() : throwable.toString())
+                    + " - continuing without this shard.");
+            }
+        }
+
+        if (this.netherNetServers.isEmpty()) {
+            // Nothing bound at all - let attemptStart() log and schedule a full retry.
+            throw new IllegalStateException("No NetherNet shard could be started.");
+        }
+        if (this.netherNetServers.size() < maxShards) {
+            geyser.getLogger().warning("[proxy-bridge] Only " + this.netherNetServers.size() + " of " + maxShards
+                + " NetherNet shards started. The bridge is usable, but the failed accounts will not accept joins.");
         }
         writeShardFiles();
     }
