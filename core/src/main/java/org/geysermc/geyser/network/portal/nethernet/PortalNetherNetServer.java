@@ -64,17 +64,45 @@ public final class PortalNetherNetServer implements AutoCloseable {
             return "";
         }
 
-        try {
-            String json = Files.readString(Path.of(authHeaderFile));
-            JsonObject root = JsonParser.parseString(json).getAsJsonObject();
-            JsonObject minecraftSession = root.getAsJsonObject("minecraftSession");
-            if (minecraftSession != null && minecraftSession.has("authorizationHeader")) {
-                return minecraftSession.get("authorizationHeader").getAsString();
+        // Boucle de retry toutes les 2 secondes (jusqu'à 30 tentatives = 60 secondes max)
+        int maxRetries = 30;
+        for (int attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                Path path = Path.of(authHeaderFile);
+                if (Files.isRegularFile(path)) {
+                    String json = Files.readString(path);
+                    if (!json.isBlank()) {
+                        JsonObject root = JsonParser.parseString(json).getAsJsonObject();
+                        JsonObject minecraftSession = root.getAsJsonObject("minecraftSession");
+                        if (minecraftSession != null && minecraftSession.has("authorizationHeader")) {
+                            String header = minecraftSession.get("authorizationHeader").getAsString();
+                            if (header != null && !header.isBlank()) {
+                                if (attempt > 1) {
+                                    geyser.getLogger().info("[proxy-bridge] Successfully loaded auth header from " + authHeaderFile + " after " + attempt + " attempts.");
+                                }
+                                return header;
+                            }
+                        }
+                    }
+                }
+            } catch (Exception exception) {
+                // Ignore les erreurs temporaires si le fichier est en cours d'écriture
             }
-            geyser.getLogger().warning("[proxy-bridge] minecraftSession.authorizationHeader was not found in " + authHeaderFile);
-        } catch (Exception exception) {
-            geyser.getLogger().error("[proxy-bridge] Failed to read Xbox auth header file: " + authHeaderFile, exception);
+
+            if (attempt < maxRetries) {
+                if (attempt == 1) {
+                    geyser.getLogger().info("[proxy-bridge] Waiting for auth cache file to be ready: " + authHeaderFile + " ...");
+                }
+                try {
+                    Thread.sleep(2000); // Attend 2 secondes avant de réessayer
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
         }
+
+        geyser.getLogger().warning("[proxy-bridge] Failed to read valid Xbox auth header from " + authHeaderFile + " after 60 seconds.");
         return "";
     }
 
@@ -243,3 +271,4 @@ public final class PortalNetherNetServer implements AutoCloseable {
         }
     }
 }
+```[cite: 112]
