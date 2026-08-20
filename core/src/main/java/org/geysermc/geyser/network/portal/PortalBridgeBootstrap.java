@@ -67,6 +67,7 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
     private static final long STARTUP_RETRY_DELAY_SECONDS = 10;
     private final List<PortalNetherNetServer> netherNetServers = new ArrayList<>();
     private volatile String authHeaderFingerprint = "";
+    private final java.util.Map<String, String> shardFingerprints = new java.util.concurrent.ConcurrentHashMap<>();
 
     public PortalBridgeBootstrap(GeyserImpl geyser) {
         this.geyser = geyser;
@@ -208,18 +209,36 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
                 return;
             }
 
-            geyser.getLogger().info("[proxy-bridge] Xbox auth source changed; reloading NetherNet signaling.");
             synchronized (this) {
                 String confirmedFingerprint = computeCombinedFingerprint();
                 if (confirmedFingerprint.isBlank() || Objects.equals(confirmedFingerprint, this.authHeaderFingerprint)) {
                     return;
                 }
+
+                // Reload ONLY the shards whose own token changed. The combined fingerprint
+                // changes whenever ANY account refreshes, so reloading every shard here meant
+                // one account's routine token refresh tore down and rebuilt the signaling
+                // channel - and allocated a fresh native PeerConnectionFactory - for every
+                // other shard too, repeatedly, for no reason.
+                int reloaded = 0;
                 for (PortalNetherNetServer server : this.netherNetServers) {
+                    String file = server.authHeaderFile();
+                    String previous = this.shardFingerprints.get(file);
+                    String latest = PortalNetherNetServer.authHeaderFingerprint(this.geyser, this.config, file);
+                    if (latest.isBlank() || Objects.equals(latest, previous)) {
+                        continue;
+                    }
+                    geyser.getLogger().info("[proxy-bridge] Xbox auth source changed for " + file + "; reloading its NetherNet signaling.");
                     server.reloadSignaling();
+                    this.shardFingerprints.put(file, latest);
+                    reloaded++;
                 }
-                writeShardFiles();
+
+                if (reloaded > 0) {
+                    writeShardFiles();
+                    writeStatusFile();
+                }
                 this.authHeaderFingerprint = confirmedFingerprint;
-                writeStatusFile();
             }
         } catch (Throwable throwable) {
             ConnectException authFailure = findAuthConnectException(throwable);
@@ -319,6 +338,7 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
 
     private synchronized void startNetherNetServers() {
         this.netherNetServers.clear();
+        this.shardFingerprints.clear();
         List<String> persistedNetworkIds = readPersistedNetworkIds();
         List<String> authFiles = this.config.xboxAuthHeaderFiles();
         
@@ -337,6 +357,10 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
             PortalNetherNetServer server = new PortalNetherNetServer(this.geyser, this.config, authFile, configuredNetworkId);
             server.start();
             this.netherNetServers.add(server);
+            // Record the token this shard actually started with, so the watcher only
+            // reloads it once that specific account's token really changes.
+            this.shardFingerprints.put(authFile,
+                PortalNetherNetServer.authHeaderFingerprint(this.geyser, this.config, authFile));
         }
         writeShardFiles();
     }

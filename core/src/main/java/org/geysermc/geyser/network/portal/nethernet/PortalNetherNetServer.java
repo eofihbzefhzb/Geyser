@@ -171,6 +171,12 @@ public final class PortalNetherNetServer implements AutoCloseable {
         // WHICH account's token Xbox rejected, and the shards that already bound
         // successfully have logged an indistinguishable success line.
         String shardLabel = this.authHeaderFile.isBlank() ? "<config header>" : this.authHeaderFile;
+        // Log the shard BEFORE binding. Wrapping the failure afterwards is unreliable here:
+        // Netty rethrows the original exception instance from the event-loop thread, so the
+        // logged stack trace can hide which shard was in flight. A plain "attempting" line
+        // means the last one printed before an error is always the shard that failed.
+        this.geyser.getLogger().info("[proxy-bridge] Binding NetherNet ingress for auth source " + shardLabel
+            + " (network id " + this.signaling.getLocalNetworkId() + ", token " + shortAuthFingerprint() + ")");
         try {
             this.channel = bootstrap.bind(new InetSocketAddress(0)).syncUninterruptibly().channel();
         } catch (Throwable throwable) {
@@ -289,6 +295,14 @@ public final class PortalNetherNetServer implements AutoCloseable {
 
     public String networkId() {
         return this.signaling.getLocalNetworkId();
+    }
+
+    /**
+     * @return the per-shard Xbox auth cache file this server authenticates with, so the
+     * bootstrap can reload only the shard whose token actually changed.
+     */
+    public String authHeaderFile() {
+        return this.authHeaderFile;
     }
 
     /**
