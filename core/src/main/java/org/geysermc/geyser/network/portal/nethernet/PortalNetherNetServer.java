@@ -270,4 +270,3 @@ public final class PortalNetherNetServer implements AutoCloseable {
         }
     }
 }
-```[cite: 112]
