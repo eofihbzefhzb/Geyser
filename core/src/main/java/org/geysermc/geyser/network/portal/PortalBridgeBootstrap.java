@@ -63,6 +63,8 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
     private final List<CIDRMatcher> trustedProxyMatchers;
     private final List<String> configuredRules;
     private @Nullable ScheduledExecutorService statusWriterExecutor;
+    private @Nullable ScheduledExecutorService startupRetryExecutor;
+    private static final long STARTUP_RETRY_DELAY_SECONDS = 10;
     private final List<PortalNetherNetServer> netherNetServers = new ArrayList<>();
     private volatile String authHeaderFingerprint = "";
 
@@ -91,14 +93,44 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
             return;
         }
 
+        attemptStart(1);
+    }
+
+    // A failed attempt (e.g. Xbox rejects a stale/not-yet-ready auth token with 401 while
+    // MCXboxBroadcast is still starting up) used to permanently disable NetherNet ingress
+    // for the rest of this Geyser process, since reloadSignalingIfAuthChanged() only ever
+    // reloads servers that are already in netherNetServers - there was nothing left to
+    // reload after a failed startup. Retry on a timer instead of giving up after one try.
+    private void attemptStart(int attempt) {
         try {
             startNetherNetServers();
             this.authHeaderFingerprint = computeCombinedFingerprint();
             startStatusWriter();
+            if (this.startupRetryExecutor != null) {
+                this.startupRetryExecutor.shutdownNow();
+                this.startupRetryExecutor = null;
+            }
+            if (attempt > 1) {
+                geyser.getLogger().info("[proxy-bridge] NetherNet ingress started successfully after " + attempt + " attempts.");
+            }
         } catch (Throwable throwable) {
-            geyser.getLogger().error("[proxy-bridge] Failed to start NetherNet ingress.", throwable);
-            close();
+            geyser.getLogger().error("[proxy-bridge] Failed to start NetherNet ingress (attempt " + attempt
+                + "). This is expected if the Xbox auth source (e.g. MCXboxBroadcast's cache.json) is not ready "
+                + "or its token is stale yet; will retry in " + STARTUP_RETRY_DELAY_SECONDS + "s.", throwable);
+            closeNetherNetServersOnly();
+            scheduleStartupRetry(attempt + 1);
         }
+    }
+
+    private void scheduleStartupRetry(int nextAttempt) {
+        if (this.startupRetryExecutor == null) {
+            this.startupRetryExecutor = Executors.newSingleThreadScheduledExecutor(runnable -> {
+                Thread thread = new Thread(runnable, "GeyserPortalBridgeStartupRetry");
+                thread.setDaemon(true);
+                return thread;
+            });
+        }
+        this.startupRetryExecutor.schedule(() -> attemptStart(nextAttempt), STARTUP_RETRY_DELAY_SECONDS, TimeUnit.SECONDS);
     }
 
     public boolean isTrustedProxy(@Nullable InetSocketAddress address) {
@@ -125,12 +157,20 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
 
     @Override
     public void close() {
+        if (this.startupRetryExecutor != null) {
+            this.startupRetryExecutor.shutdownNow();
+            this.startupRetryExecutor = null;
+        }
         if (this.statusWriterExecutor != null) {
             this.statusWriterExecutor.shutdownNow();
             this.statusWriterExecutor = null;
         }
         deleteStatusFile();
         deleteShardFiles();
+        closeNetherNetServersOnly();
+    }
+
+    private void closeNetherNetServersOnly() {
         for (PortalNetherNetServer server : this.netherNetServers) {
             server.close();
         }
