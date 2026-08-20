@@ -1,10 +1,14 @@
 name: Build
 
+# Upstream's full multi-platform CI. It depends on GeyserMC organisation secrets
+# (RELEASE_APP_ID / RELEASE_APP_PK) that a fork does not have, and it builds every
+# bootstrap. This fork releases Velocity from release.yml instead, so this workflow
+# is kept for reference but only runs when triggered by hand.
 on:
   workflow_dispatch:
   push:
     branches-ignore:
-      - 'gh-readonly-queue/**'
+      - '**'
     paths-ignore:
       - '.github/ISSUE_TEMPLATE/*.yml'
       - '.github/workflows/build-remote.yml'
