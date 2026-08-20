@@ -181,7 +181,6 @@ public final class PortalNetherNetServer implements AutoCloseable {
         this.geyser.getLogger().info("[proxy-bridge] NetherNet signaling reloaded for " + this.authHeaderFile + ", new network ID " + this.signaling.getLocalNetworkId());
     }
 
-    // OPTIMISATION : Suppression du bloc try/catch inutile, remplacé par une vérification null safe
     private static void disposeQuietly(PeerConnectionFactory factory) {
         if (factory != null) {
             factory.dispose();
