@@ -173,9 +173,13 @@ public final class PortalNetherNetServer implements AutoCloseable {
         String shardLabel = this.authHeaderFile.isBlank() ? "<config header>" : this.authHeaderFile;
         try {
             this.channel = bootstrap.bind(new InetSocketAddress(0)).syncUninterruptibly().channel();
-        } catch (RuntimeException exception) {
+        } catch (Throwable throwable) {
+            // syncUninterruptibly() rethrows the bind failure as-is, and the Xbox signaling
+            // failure is a java.net.ConnectException - a checked exception, NOT a
+            // RuntimeException - so this must catch Throwable or the shard context below
+            // is silently lost and the log shows a bare, unattributable 401.
             throw new IllegalStateException("NetherNet ingress failed to bind for auth source " + shardLabel
-                + " (network id " + this.signaling.getLocalNetworkId() + ", token " + shortAuthFingerprint() + ")", exception);
+                + " (network id " + this.signaling.getLocalNetworkId() + ", token " + shortAuthFingerprint() + ")", throwable);
         }
         this.geyser.getLogger().info("[proxy-bridge] NetherNet ingress started with network ID " + this.signaling.getLocalNetworkId()
             + " for auth source " + shardLabel + " (token " + shortAuthFingerprint() + ")");
@@ -238,12 +242,15 @@ public final class PortalNetherNetServer implements AutoCloseable {
         Channel newChannel;
         try {
             newChannel = bootstrap.bind(new InetSocketAddress(0)).syncUninterruptibly().channel();
-        } catch (RuntimeException exception) {
+        } catch (Throwable throwable) {
             // Keep serving on the old signaling channel/factory if the new one fails
             // to bind; do not tear down anything that was previously working.
+            // Must be Throwable, not RuntimeException: syncUninterruptibly() rethrows
+            // the checked java.net.ConnectException that a rejected Xbox token produces,
+            // which would otherwise skip this cleanup and leak the new native factory.
             newSignaling.close();
             disposeQuietly(newPeerConnectionFactory);
-            throw exception;
+            throw throwable;
         }
 
         this.channel = newChannel;
