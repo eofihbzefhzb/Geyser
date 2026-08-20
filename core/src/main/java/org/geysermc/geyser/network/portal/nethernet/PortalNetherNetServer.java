@@ -73,30 +73,48 @@ public final class PortalNetherNetServer implements AutoCloseable {
 
         // The publisher (e.g. MCXboxBroadcast) may still be finishing its own auth flow
         // for this account/sub-session when Geyser starts, so the cache file this shard
-        // needs might not exist or be fully written yet. Retry for up to a minute instead
-        // of giving up on the very first read.
+        // needs might not exist, be fully written, or have reached the minecraftSession
+        // step of that auth flow yet. Retry for up to a minute instead of giving up on
+        // the very first read, and report exactly which of those is the case so a
+        // permanent failure (as opposed to a startup race) is diagnosable from the log
+        // instead of a bare "no valid header" message.
         int maxRetries = 30;
+        String lastFailureReason = "unknown";
         for (int attempt = 1; attempt <= maxRetries; attempt++) {
             try {
                 Path path = Path.of(targetFile);
-                if (Files.isRegularFile(path)) {
+                if (!Files.isRegularFile(path)) {
+                    lastFailureReason = "file does not exist yet";
+                } else {
                     String json = Files.readString(path);
-                    if (!json.isBlank()) {
+                    if (json.isBlank()) {
+                        lastFailureReason = "file exists but is empty";
+                    } else {
                         JsonObject root = JsonParser.parseString(json).getAsJsonObject();
                         JsonObject minecraftSession = root.getAsJsonObject("minecraftSession");
-                        if (minecraftSession != null && minecraftSession.has("authorizationHeader")) {
+                        if (minecraftSession == null) {
+                            // This is the common "stuck forever" case, not a startup race: the
+                            // publisher's own auth chain (xboxLiveXstsToken -> playFabToken ->
+                            // profile -> minecraftSession) saved a partial cache after an earlier
+                            // step but hasn't successfully completed the minecraftSession step for
+                            // this account. Retrying here will never fix that; the publisher needs
+                            // to successfully refresh that account's Xbox auth first.
+                            lastFailureReason = "cache file has no \"minecraftSession\" entry yet - "
+                                + "the publisher's auth flow for this account hasn't reached that step";
+                        } else if (!minecraftSession.has("authorizationHeader")
+                                || minecraftSession.get("authorizationHeader").getAsString().isBlank()) {
+                            lastFailureReason = "cache file's \"minecraftSession\" entry has no authorizationHeader value";
+                        } else {
                             String header = minecraftSession.get("authorizationHeader").getAsString();
-                            if (header != null && !header.isBlank()) {
-                                if (attempt > 1) {
-                                    geyser.getLogger().info("[proxy-bridge] Successfully loaded auth header from " + targetFile + " after " + attempt + " attempts.");
-                                }
-                                return header;
+                            if (attempt > 1) {
+                                geyser.getLogger().info("[proxy-bridge] Successfully loaded auth header from " + targetFile + " after " + attempt + " attempts.");
                             }
+                            return header;
                         }
                     }
                 }
             } catch (Exception exception) {
-                // Ignore transient errors while the file is still being written.
+                lastFailureReason = "error reading/parsing file: " + exception;
             }
 
             if (attempt < maxRetries) {
@@ -112,7 +130,8 @@ public final class PortalNetherNetServer implements AutoCloseable {
             }
         }
 
-        geyser.getLogger().warning("[proxy-bridge] Failed to read a valid Xbox auth header from " + targetFile + " after 60 seconds.");
+        geyser.getLogger().warning("[proxy-bridge] Failed to read a valid Xbox auth header from " + targetFile
+            + " after 60 seconds. Last reason: " + lastFailureReason);
         return "";
     }
 
