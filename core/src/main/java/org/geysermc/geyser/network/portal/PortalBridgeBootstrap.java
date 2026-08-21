@@ -68,6 +68,8 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
     private final List<PortalNetherNetServer> netherNetServers = new ArrayList<>();
     private final NetherNetEventLoops eventLoops = new NetherNetEventLoops();
     private volatile String authHeaderFingerprint = "";
+    /** Set after the first failed pass so the retry loop stops repeating per-shard errors. */
+    private volatile boolean quietShardFailures = false;
     private final java.util.Map<String, String> shardFingerprints = new java.util.concurrent.ConcurrentHashMap<>();
 
     public PortalBridgeBootstrap(GeyserImpl geyser) {
@@ -95,7 +97,29 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
             return;
         }
 
+        silenceSignalingLibraryLogger();
         attemptStart(1);
+    }
+
+    /**
+     * Mutes dev.kastle's own signaling logger.
+     * <p>
+     * That library logs the full websocket handshake stacktrace itself on every failed bind, so a
+     * rejected token produced two stacktraces per shard per retry. The standalone bootstrap silences
+     * it through log4j2.xml, but this fork runs on Velocity, which uses its own logging config, so
+     * the level has to be set programmatically here. Done reflectively and best-effort: if Log4j core
+     * is not reachable the bridge still works, the log is just noisier.
+     */
+    private void silenceSignalingLibraryLogger() {
+        try {
+            Class<?> configurator = Class.forName("org.apache.logging.log4j.core.config.Configurator");
+            Class<?> level = Class.forName("org.apache.logging.log4j.Level");
+            Object off = level.getField("OFF").get(null);
+            configurator.getMethod("setLevel", String.class, level)
+                .invoke(null, "dev.kastle.netty.channel.nethernet.signaling.NetherNetXboxRpcSignaling", off);
+        } catch (Throwable ignored) {
+            // Best effort only.
+        }
     }
 
     // A failed attempt (e.g. Xbox rejects a stale/not-yet-ready auth token with 401 while
@@ -116,15 +140,49 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
                 geyser.getLogger().info("[proxy-bridge] NetherNet ingress started successfully after " + attempt + " attempts.");
             }
         } catch (Throwable throwable) {
-            geyser.getLogger().error("[proxy-bridge] Failed to start NetherNet ingress (attempt " + attempt
-                + "). This is expected if the Xbox auth source (e.g. MCXboxBroadcast's cache.json) is not ready "
-                + "or its token is stale yet; will retry in " + STARTUP_RETRY_DELAY_SECONDS + "s.", throwable);
             closeNetherNetServersOnly();
-            scheduleStartupRetry(attempt + 1);
+            long delay = retryDelaySeconds(attempt);
+            // Log the reason once, then stay quiet. Passing the throwable here printed a full
+            // stacktrace per shard per attempt - with 3 shards retrying every 10s that is 6
+            // stacktraces every 10 seconds forever, which buries every other line in the log.
+            if (attempt == 1) {
+                geyser.getLogger().error("[proxy-bridge] NetherNet ingress could not start: " + rootMessage(throwable)
+                    + " Retrying in the background; no further attempts will be logged until one succeeds.");
+            } else if (attempt % 30 == 0) {
+                geyser.getLogger().warning("[proxy-bridge] NetherNet ingress still down after " + attempt
+                    + " attempts: " + rootMessage(throwable));
+            }
+            scheduleStartupRetry(attempt + 1, delay);
         }
     }
 
-    private void scheduleStartupRetry(int nextAttempt) {
+    /** Last path segment only - the full absolute path is already in the "Binding" line. */
+    private static String shortName(String authFile) {
+        if (authFile == null || authFile.isBlank()) {
+            return "config header";
+        }
+        int slash = Math.max(authFile.lastIndexOf('/'), authFile.lastIndexOf('\\'));
+        return slash >= 0 ? authFile.substring(slash + 1) : authFile;
+    }
+
+    /** Back off 10s -> 30s -> 60s so a permanently rejected token stops hammering Xbox and the log. */
+    private static long retryDelaySeconds(int attempt) {
+        if (attempt < 3) {
+            return STARTUP_RETRY_DELAY_SECONDS;
+        }
+        return attempt < 10 ? 30 : 60;
+    }
+
+    private static String rootMessage(Throwable throwable) {
+        Throwable root = throwable;
+        while (root.getCause() != null) {
+            root = root.getCause();
+        }
+        String message = root.getMessage();
+        return message == null || message.isBlank() ? root.getClass().getSimpleName() : message;
+    }
+
+    private void scheduleStartupRetry(int nextAttempt, long delaySeconds) {
         if (this.startupRetryExecutor == null) {
             this.startupRetryExecutor = Executors.newSingleThreadScheduledExecutor(runnable -> {
                 Thread thread = new Thread(runnable, "GeyserPortalBridgeStartupRetry");
@@ -132,7 +190,7 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
                 return thread;
             });
         }
-        this.startupRetryExecutor.schedule(() -> attemptStart(nextAttempt), STARTUP_RETRY_DELAY_SECONDS, TimeUnit.SECONDS);
+        this.startupRetryExecutor.schedule(() -> attemptStart(nextAttempt), delaySeconds, TimeUnit.SECONDS);
     }
 
     public boolean isTrustedProxy(@Nullable InetSocketAddress address) {
@@ -370,18 +428,24 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
                 this.shardFingerprints.put(authFile,
                     PortalNetherNetServer.authHeaderFingerprint(this.geyser, this.config, authFile));
             } catch (Throwable throwable) {
+                // Named once per shard on the first pass only; the retry loop repeats the same
+                // three failures forever and does not need to restate them every 10 seconds.
+                if (quietShardFailures) {
+                    continue;
+                }
                 ConnectException authFailure = findAuthConnectException(throwable);
-                geyser.getLogger().error("[proxy-bridge] Shard " + (i + 1) + " could not start for auth source "
-                    + (authFile.isBlank() ? "<config header>" : authFile) + ": "
-                    + (authFailure != null ? authFailure.getMessage() : throwable.toString())
-                    + " - continuing without this shard.");
+                geyser.getLogger().error("[proxy-bridge] Shard " + (i + 1) + " rejected ("
+                    + shortName(authFile) + "): "
+                    + (authFailure != null ? authFailure.getMessage() : rootMessage(throwable)));
             }
         }
 
         if (this.netherNetServers.isEmpty()) {
             // Nothing bound at all - let attemptStart() log and schedule a full retry.
+            this.quietShardFailures = true;
             throw new IllegalStateException("No NetherNet shard could be started.");
         }
+        this.quietShardFailures = false;
         if (this.netherNetServers.size() < maxShards) {
             geyser.getLogger().warning("[proxy-bridge] Only " + this.netherNetServers.size() + " of " + maxShards
                 + " NetherNet shards started. The bridge is usable, but the failed accounts will not accept joins.");

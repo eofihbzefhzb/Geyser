@@ -173,8 +173,13 @@ public final class PortalNetherNetServer implements AutoCloseable {
         // Netty rethrows the original exception instance from the event-loop thread, so the
         // logged stack trace can hide which shard was in flight. A plain "attempting" line
         // means the last one printed before an error is always the shard that failed.
-        this.geyser.getLogger().info("[proxy-bridge] Binding NetherNet ingress for auth source " + shardLabel
-            + " (network id " + this.signaling.getLocalNetworkId() + ", token " + shortAuthFingerprint() + ")");
+        // Only under debug-logging: the success line below already names the shard, and the
+        // failure path names it too, so on a retry loop this was three extra INFO lines every
+        // pass for no new information.
+        if (config.debugLogging()) {
+            this.geyser.getLogger().info("[proxy-bridge] Binding NetherNet ingress for auth source " + shardLabel
+                + " (network id " + this.signaling.getLocalNetworkId() + ", token " + shortAuthFingerprint() + ")");
+        }
         try {
             this.channel = bootstrap.bind(new InetSocketAddress(0)).syncUninterruptibly().channel();
         } catch (Throwable throwable) {
