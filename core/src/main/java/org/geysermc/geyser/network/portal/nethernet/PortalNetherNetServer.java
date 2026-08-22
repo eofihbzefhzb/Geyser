@@ -14,6 +14,7 @@ import org.geysermc.geyser.GeyserImpl;
 import org.geysermc.geyser.configuration.PortalBridgeConfig;
 
 import java.net.InetSocketAddress;
+import java.util.concurrent.TimeUnit;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
@@ -24,6 +25,11 @@ public final class PortalNetherNetServer implements AutoCloseable {
     private final GeyserImpl geyser;
     private final PortalBridgeConfig config;
     private final String authHeaderFile;
+    private static final long DISPOSAL_CHECK_SECONDS = 30;
+    private static final int MAX_DISPOSAL_ATTEMPTS = 20; // ~10 minutes, then free regardless.
+    /** Factories retired by a reload, awaiting a safe moment to free their native handle. */
+    private final java.util.Set<PeerConnectionFactory> retiredFactories =
+        java.util.concurrent.ConcurrentHashMap.newKeySet();
     private final NetherNetEventLoops eventLoops;
     private final GeyserNetherNetServerInitializer initializer;
     private PeerConnectionFactory peerConnectionFactory;
@@ -269,7 +275,13 @@ public final class PortalNetherNetServer implements AutoCloseable {
             oldChannel.close().syncUninterruptibly();
         }
         oldSignaling.close();
-        disposeQuietly(oldPeerConnectionFactory);
+        // Do NOT dispose the old factory here. Closing the old *server* channel does not close
+        // the peer channels already accepted through it - players mid-session keep running on
+        // native PeerConnections owned by this factory. dispose() frees the native handle those
+        // peers are still using, so a token refresh while anyone was connected could take the
+        // JVM down with a native fault rather than a Java exception. Hand it to the reaper
+        // instead, which disposes it once no session is left on it.
+        scheduleDisposal(oldPeerConnectionFactory);
 
         this.geyser.getLogger().info("[proxy-bridge] NetherNet signaling reloaded for " + this.authHeaderFile + ", new network ID " + this.signaling.getLocalNetworkId());
     }
@@ -290,7 +302,44 @@ public final class PortalNetherNetServer implements AutoCloseable {
         }
         this.signaling.close();
         // The event loop groups are shared between shards and shut down by the bootstrap.
+        // On shutdown the peers are going away with the process, so disposing inline is fine;
+        // drain anything the reaper is still holding so nothing is left allocated.
         disposeQuietly(this.peerConnectionFactory);
+        for (PeerConnectionFactory pending : this.retiredFactories) {
+            disposeQuietly(pending);
+        }
+        this.retiredFactories.clear();
+    }
+
+    /**
+     * Disposes a retired {@link PeerConnectionFactory} only once nothing is running on it.
+     * <p>
+     * Freeing it while peers accepted through it are still alive is a native use-after-free, so
+     * the factory is parked and re-checked on a timer. The grace period is bounded: after
+     * {@link #MAX_DISPOSAL_ATTEMPTS} checks the factory is disposed anyway, otherwise a peer that
+     * never fully closes would pin one factory per token refresh forever - the leak this is
+     * meant to avoid.
+     */
+    private void scheduleDisposal(PeerConnectionFactory factory) {
+        if (factory == null) {
+            return;
+        }
+        this.retiredFactories.add(factory);
+        scheduleDisposalAttempt(factory, 1);
+    }
+
+    private void scheduleDisposalAttempt(PeerConnectionFactory factory, int attempt) {
+        this.eventLoops.workerGroup().schedule(() -> {
+            if (!this.retiredFactories.contains(factory)) {
+                return;
+            }
+            if (this.geyser.getSessionManager().getAllSessions().isEmpty() || attempt >= MAX_DISPOSAL_ATTEMPTS) {
+                this.retiredFactories.remove(factory);
+                disposeQuietly(factory);
+                return;
+            }
+            scheduleDisposalAttempt(factory, attempt + 1);
+        }, DISPOSAL_CHECK_SECONDS, TimeUnit.SECONDS);
     }
 
     public String networkId() {

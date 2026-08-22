@@ -169,15 +169,36 @@ public class GeyserSessionAdapter extends SessionAdapter {
         MinecraftLocale.downloadAndLoadLocale(locale);
     }
 
+    /** Component#toString() dumps the whole style/children tree; only the text is useful in a log. */
+    private static String plainReason(net.kyori.adventure.text.Component reason) {
+        try {
+            return net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer.plainText().serialize(reason);
+        } catch (Throwable ignored) {
+            return reason.toString();
+        }
+    }
+
     @Override
     public void disconnected(DisconnectedEvent event) {
         session.loggingIn = false;
 
         if (session.isProxyBridgeIngress()) {
-            String stage = session.loggedIn ? "java_connected" : "java_login";
-            String reason = event.getReason() == null ? "unspecified" : event.getReason().toString();
-            geyser.getLogger().info("[proxy-bridge] Java/Paper disconnected for "
-                + session.bedrockUsername() + " stage=" + stage + " reason=" + reason);
+            // session.loggedIn is cleared by GeyserSession#disconnect BEFORE this event fires, so
+            // reading it here reported stage=java_login for every ordinary quit, including players
+            // who had been connected for hours. spawned() is the durable signal instead.
+            boolean wasPlaying = session.isSpawned();
+            String reason = event.getReason() == null ? "unspecified" : plainReason(event.getReason());
+            if (wasPlaying) {
+                // Ordinary quit: the Bedrock side already logs the disconnect, so keep this to debug.
+                if (geyser.config().advanced().bedrock().portalBridge().debugLogging()) {
+                    geyser.getLogger().info("[proxy-bridge] " + session.bedrockUsername()
+                        + " left (" + reason + ")");
+                }
+            } else {
+                // Dropped before ever spawning - this one is worth seeing, it means the join failed.
+                geyser.getLogger().warning("[proxy-bridge] " + session.bedrockUsername()
+                    + " lost the Java connection before spawning (" + reason + ")");
+            }
         }
 
         String disconnectMessage, customDisconnectMessage = null;

@@ -31,16 +31,18 @@ public final class GeyserNetherNetServerInitializer extends NetherNetBedrockChan
     @Override
     protected void initSession(@NonNull BedrockServerSession bedrockServerSession) {
         try {
-            this.geyser.getLogger().info("[proxy-bridge] NetherNet peer connected");
             if (PROXY_BRIDGE_DEBUG) {
+                this.geyser.getLogger().info("[proxy-bridge] NetherNet peer connected");
                 this.geyser.getLogger().info("[proxy-bridge] nethernet initSession remote=" + bedrockServerSession.getSocketAddress());
             }
 
             bedrockServerSession.setLogging(this.geyser.config().debugMode());
             GeyserSession session = new GeyserSession(this.geyser, bedrockServerSession, this.playerGroup.next());
             session.setProxyBridgeIngress(true);
-            this.geyser.getLogger().info("[proxy-bridge] NetherNet Bedrock session initialized remote="
-                + bedrockServerSession.getSocketAddress());
+            if (this.geyser.config().advanced().bedrock().portalBridge().debugLogging()) {
+                this.geyser.getLogger().info("[proxy-bridge] NetherNet Bedrock session initialized remote="
+                    + bedrockServerSession.getSocketAddress());
+            }
 
             if (!bedrockServerSession.isSubClient()) {
                 Channel channel = bedrockServerSession.getPeer().getChannel();
