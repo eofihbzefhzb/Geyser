@@ -183,21 +183,23 @@ public class GeyserSessionAdapter extends SessionAdapter {
         session.loggingIn = false;
 
         if (session.isProxyBridgeIngress()) {
-            // session.loggedIn is cleared by GeyserSession#disconnect BEFORE this event fires, so
-            // reading it here reported stage=java_login for every ordinary quit, including players
-            // who had been connected for hours. spawned() is the durable signal instead.
-            boolean wasPlaying = session.isSpawned();
+            // What matters is WHY the link ended, not whether the player had spawned. Using
+            // spawned() flagged perfectly normal refusals - maintenance, whitelist, ban, server
+            // full - as warnings, because the backend closes those before the player spawns.
+            // A server-sent disconnect message has no Throwable; only a genuine transport
+            // failure does, and that is the only case worth raising the level for.
             String reason = event.getReason() == null ? "unspecified" : plainReason(event.getReason());
-            if (wasPlaying) {
-                // Ordinary quit: the Bedrock side already logs the disconnect, so keep this to debug.
+            if (event.getCause() == null) {
+                // Normal disconnect. Geyser already logs one INFO line for it just below, so this
+                // stays on debug to avoid printing the same event twice.
                 if (geyser.config().advanced().bedrock().portalBridge().debugLogging()) {
                     geyser.getLogger().info("[proxy-bridge] " + session.bedrockUsername()
                         + " left (" + reason + ")");
                 }
             } else {
-                // Dropped before ever spawning - this one is worth seeing, it means the join failed.
                 geyser.getLogger().warning("[proxy-bridge] " + session.bedrockUsername()
-                    + " lost the Java connection before spawning (" + reason + ")");
+                    + " lost the Java connection: " + event.getCause().getClass().getSimpleName()
+                    + " (" + reason + ")");
             }
         }
 

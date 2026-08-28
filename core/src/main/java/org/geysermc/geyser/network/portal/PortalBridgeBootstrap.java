@@ -156,13 +156,24 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
         }
     }
 
-    /** Last path segment only - the full absolute path is already in the "Binding" line. */
+    /**
+     * Parent folder + file name, e.g. {@code nour1/cache.json}.
+     * <p>
+     * The file name alone is useless here: every account's cache is named cache.json, so all
+     * shards reported the same "cache.json" and the message could not tell them apart. The
+     * folder is what identifies the account.
+     */
     private static String shortName(String authFile) {
         if (authFile == null || authFile.isBlank()) {
             return "config header";
         }
-        int slash = Math.max(authFile.lastIndexOf('/'), authFile.lastIndexOf('\\'));
-        return slash >= 0 ? authFile.substring(slash + 1) : authFile;
+        String normalised = authFile.replace('\\', '/');
+        int last = normalised.lastIndexOf('/');
+        if (last < 0) {
+            return normalised;
+        }
+        int parent = normalised.lastIndexOf('/', last - 1);
+        return parent < 0 ? normalised : normalised.substring(parent + 1);
     }
 
     /** Back off 10s -> 30s -> 60s so a permanently rejected token stops hammering Xbox and the log. */
