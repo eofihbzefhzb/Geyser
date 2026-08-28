@@ -65,12 +65,9 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
     private @Nullable ScheduledExecutorService statusWriterExecutor;
     private @Nullable ScheduledExecutorService startupRetryExecutor;
     private static final long STARTUP_RETRY_DELAY_SECONDS = 10;
-    private final List<PortalNetherNetServer> netherNetServers = new ArrayList<>();
+    private @Nullable PortalNetherNetServer netherNetServer;
     private final NetherNetEventLoops eventLoops = new NetherNetEventLoops();
     private volatile String authHeaderFingerprint = "";
-    /** Set after the first failed pass so the retry loop stops repeating per-shard errors. */
-    private volatile boolean quietShardFailures = false;
-    private final java.util.Map<String, String> shardFingerprints = new java.util.concurrent.ConcurrentHashMap<>();
 
     public PortalBridgeBootstrap(GeyserImpl geyser) {
         this.geyser = geyser;
@@ -92,7 +89,7 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
             geyser.getLogger().info("[proxy-bridge] Trusted proxy rules: " + configuredRules.size());
         }
 
-        if (config.xboxAuthHeader().isBlank() && config.xboxAuthHeaderFiles().isEmpty()) {
+        if (config.xboxAuthHeader().isBlank() && config.xboxAuthHeaderFile().isBlank()) {
             geyser.getLogger().warning("[proxy-bridge] Xbox auth header source is not configured; NetherNet ingress will stay disabled.");
             return;
         }
@@ -125,12 +122,11 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
     // A failed attempt (e.g. Xbox rejects a stale/not-yet-ready auth token with 401 while
     // MCXboxBroadcast is still starting up) used to permanently disable NetherNet ingress
     // for the rest of this Geyser process, since reloadSignalingIfAuthChanged() only ever
-    // reloads servers that are already in netherNetServers - there was nothing left to
-    // reload after a failed startup. Retry on a timer instead of giving up after one try.
+    // reloads a server that is already running - there was nothing left to reload after a
+    // failed startup. Retry on a timer instead of giving up after one try.
     private void attemptStart(int attempt) {
         try {
-            startNetherNetServers();
-            this.authHeaderFingerprint = computeCombinedFingerprint();
+            startNetherNetServer();
             startStatusWriter();
             if (this.startupRetryExecutor != null) {
                 this.startupRetryExecutor.shutdownNow();
@@ -156,25 +152,6 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
         }
     }
 
-    /**
-     * Parent folder + file name, e.g. {@code nour1/cache.json}.
-     * <p>
-     * The file name alone is useless here: every account's cache is named cache.json, so all
-     * shards reported the same "cache.json" and the message could not tell them apart. The
-     * folder is what identifies the account.
-     */
-    private static String shortName(String authFile) {
-        if (authFile == null || authFile.isBlank()) {
-            return "config header";
-        }
-        String normalised = authFile.replace('\\', '/');
-        int last = normalised.lastIndexOf('/');
-        if (last < 0) {
-            return normalised;
-        }
-        int parent = normalised.lastIndexOf('/', last - 1);
-        return parent < 0 ? normalised : normalised.substring(parent + 1);
-    }
 
     /** Back off 10s -> 30s -> 60s so a permanently rejected token stops hammering Xbox and the log. */
     private static long retryDelaySeconds(int attempt) {
@@ -243,10 +220,10 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
     }
 
     private void closeNetherNetServersOnly() {
-        for (PortalNetherNetServer server : this.netherNetServers) {
-            server.close();
+        if (this.netherNetServer != null) {
+            this.netherNetServer.close();
+            this.netherNetServer = null;
         }
-        this.netherNetServers.clear();
     }
 
     private void startStatusWriter() {
@@ -261,16 +238,7 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
     }
 
     private String computeCombinedFingerprint() {
-        StringBuilder combined = new StringBuilder();
-        List<String> files = config.xboxAuthHeaderFiles();
-        if (files.isEmpty()) {
-            combined.append(PortalNetherNetServer.authHeaderFingerprint(this.geyser, this.config, ""));
-        } else {
-            for (String file : files) {
-                combined.append(PortalNetherNetServer.authHeaderFingerprint(this.geyser, this.config, file)).append(";");
-            }
-        }
-        return combined.toString();
+        return PortalNetherNetServer.authHeaderFingerprint(this.geyser, this.config, config.xboxAuthHeaderFile());
     }
 
     private void reloadSignalingIfAuthChanged() {
@@ -291,22 +259,10 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
                 // one account's routine token refresh tore down and rebuilt the signaling
                 // channel - and allocated a fresh native PeerConnectionFactory - for every
                 // other shard too, repeatedly, for no reason.
-                int reloaded = 0;
-                for (PortalNetherNetServer server : this.netherNetServers) {
-                    String file = server.authHeaderFile();
-                    String previous = this.shardFingerprints.get(file);
-                    String latest = PortalNetherNetServer.authHeaderFingerprint(this.geyser, this.config, file);
-                    if (latest.isBlank() || Objects.equals(latest, previous)) {
-                        continue;
-                    }
-                    geyser.getLogger().info("[proxy-bridge] Xbox auth source changed for " + file + "; reloading its NetherNet signaling.");
-                    server.reloadSignaling();
-                    this.shardFingerprints.put(file, latest);
-                    reloaded++;
-                }
-
-                if (reloaded > 0) {
-                    writeShardFiles();
+                if (this.netherNetServer != null) {
+                    geyser.getLogger().info("[proxy-bridge] Xbox auth source changed; reloading NetherNet signaling.");
+                    this.netherNetServer.reloadSignaling();
+                    writeIdentityFile();
                     writeStatusFile();
                 }
                 this.authHeaderFingerprint = confirmedFingerprint;
@@ -365,16 +321,10 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
             root.addProperty("worldName", primaryMotd);
             root.addProperty("players", players);
             root.addProperty("maxPlayers", maxPlayers);
-            root.addProperty("ready", !this.netherNetServers.isEmpty());
+            root.addProperty("ready", this.netherNetServer != null);
             root.addProperty("generatedAt", java.time.Instant.now().toString());
-            root.addProperty("shardCount", this.netherNetServers.size());
-            var networkIds = new com.google.gson.JsonArray();
-            for (PortalNetherNetServer server : this.netherNetServers) {
-                networkIds.add(server.networkId());
-            }
-            root.add("netherNetIds", networkIds);
-            if (!this.netherNetServers.isEmpty()) {
-                root.addProperty("netherNetId", this.netherNetServers.getFirst().networkId());
+            if (this.netherNetServer != null) {
+                root.addProperty("netherNetId", this.netherNetServer.networkId());
             }
 
             Path path = statusFile();
@@ -407,93 +357,47 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
         return this.geyser.configDirectory().resolve(SESSION_STATUS_FILENAME);
     }
 
-    private synchronized void startNetherNetServers() {
-        this.netherNetServers.clear();
-        this.shardFingerprints.clear();
-        List<String> persistedNetworkIds = readPersistedNetworkIds();
-        List<String> authFiles = this.config.xboxAuthHeaderFiles();
-        
-        int maxShards = Math.max(this.config.shardCount(), authFiles.size());
-
-        for (int i = 0; i < maxShards; i++) {
-            String configuredNetworkId = "";
-            if (i == 0 && !this.config.netherNetNetworkId().isBlank()) {
-                configuredNetworkId = this.config.netherNetNetworkId();
-            } else if (i < persistedNetworkIds.size()) {
-                configuredNetworkId = persistedNetworkIds.get(i);
-            }
-            
-            String authFile = i < authFiles.size() ? authFiles.get(i) : "";
-
-            // Start shards independently. A single account Xbox rejects must not stop the
-            // shards that DO authenticate: startNetherNetServers() previously threw on the
-            // first failure, so no status file was ever written, and the publisher - which
-            // waits for that file before doing anything - hung forever even though the
-            // primary account was working fine.
-            try {
-                PortalNetherNetServer server = new PortalNetherNetServer(this.geyser, this.config, this.eventLoops, authFile, configuredNetworkId);
-                server.start();
-                this.netherNetServers.add(server);
-                // Record the token this shard actually started with, so the watcher only
-                // reloads it once that specific account's token really changes.
-                this.shardFingerprints.put(authFile,
-                    PortalNetherNetServer.authHeaderFingerprint(this.geyser, this.config, authFile));
-            } catch (Throwable throwable) {
-                // Named once per shard on the first pass only; the retry loop repeats the same
-                // three failures forever and does not need to restate them every 10 seconds.
-                if (quietShardFailures) {
-                    continue;
-                }
-                ConnectException authFailure = findAuthConnectException(throwable);
-                geyser.getLogger().error("[proxy-bridge] Shard " + (i + 1) + " rejected ("
-                    + shortName(authFile) + "): "
-                    + (authFailure != null ? authFailure.getMessage() : rootMessage(throwable)));
-            }
+    /**
+     * Starts the single NetherNet ingress.
+     * <p>
+     * This used to loop over {@code shard-count} / {@code xbox-auth-header-files} and bind one
+     * ingress per Xbox account. That existed so each sub-account could advertise its own joinable
+     * session; sub-accounts now join the primary session as members instead, so there is exactly
+     * one session and therefore exactly one ingress to bind.
+     */
+    private synchronized void startNetherNetServer() {
+        String configuredNetworkId = this.config.netherNetNetworkId();
+        if (configuredNetworkId.isBlank()) {
+            configuredNetworkId = readPersistedNetworkId();
         }
 
-        if (this.netherNetServers.isEmpty()) {
-            // Nothing bound at all - let attemptStart() log and schedule a full retry.
-            this.quietShardFailures = true;
-            throw new IllegalStateException("No NetherNet shard could be started.");
-        }
-        this.quietShardFailures = false;
-        if (this.netherNetServers.size() < maxShards) {
-            geyser.getLogger().warning("[proxy-bridge] Only " + this.netherNetServers.size() + " of " + maxShards
-                + " NetherNet shards started. The bridge is usable, but the failed accounts will not accept joins.");
-        }
-        writeShardFiles();
+        PortalNetherNetServer server = new PortalNetherNetServer(
+            this.geyser, this.config, this.eventLoops, this.config.xboxAuthHeaderFile(), configuredNetworkId);
+        // Let the failure propagate: with one ingress there is nothing left to serve if it fails,
+        // so attemptStart() logs it once and schedules the retry.
+        server.start();
+        this.netherNetServer = server;
+        this.authHeaderFingerprint = computeCombinedFingerprint();
+        writeIdentityFile();
     }
 
     /**
-     * Persists the active shard network ids so a restart can rebind the same Xbox identity.
-     * <p>
-     * This used to additionally write {@code portal-nethernet-id.txt} and
-     * {@code portal-nethernet-shards.json}. Nothing ever read either one - the publisher polls
-     * {@code portal-session-status.json} and Geyser itself reads only the identities file - so
-     * they were three copies of the same data with two of them write-only.
+     * Persists the active network id so a restart rebinds the same Xbox identity instead of
+     * publishing a new one.
      */
-    private void writeShardFiles() {
+    private void writeIdentityFile() {
         try {
-            if (this.netherNetServers.isEmpty()) {
+            if (this.netherNetServer == null) {
                 return;
             }
-
             JsonObject root = new JsonObject();
-            var shards = new com.google.gson.JsonArray();
-            for (int i = 0; i < this.netherNetServers.size(); i++) {
-                JsonObject shard = new JsonObject();
-                shard.addProperty("id", "shard-" + (i + 1));
-                shard.addProperty("index", i + 1);
-                shard.addProperty("networkId", this.netherNetServers.get(i).networkId());
-                shards.add(shard);
-            }
-            root.add("shards", shards);
+            root.addProperty("networkId", this.netherNetServer.networkId());
 
             Path identitiesPath = this.geyser.configDirectory().resolve(IDENTITIES_FILENAME);
             Files.createDirectories(identitiesPath.getParent());
             Files.writeString(identitiesPath, root.toString() + System.lineSeparator());
         } catch (Exception exception) {
-            this.geyser.getLogger().warning("[proxy-bridge] Failed to persist NetherNet shard metadata: " + exception.getMessage());
+            this.geyser.getLogger().warning("[proxy-bridge] Failed to persist the NetherNet identity: " + exception.getMessage());
         }
     }
 
@@ -514,39 +418,37 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
         }
     }
 
-    private List<String> readPersistedNetworkIds() {
-        List<String> ids = new ArrayList<>();
+    /**
+     * Reads the previously bound network id. Also accepts the old {@code shards} array so an
+     * existing identities file from a sharded build still yields a stable identity on first start.
+     */
+    private String readPersistedNetworkId() {
         Path identitiesPath = this.geyser.configDirectory().resolve(IDENTITIES_FILENAME);
         if (!Files.isRegularFile(identitiesPath)) {
-            return ids;
+            return "";
         }
 
         try {
             JsonObject root = JsonParser.parseString(Files.readString(identitiesPath)).getAsJsonObject();
-            if (!root.has("shards") || !root.get("shards").isJsonArray()) {
-                return ids;
+            if (root.has("networkId") && !root.get("networkId").isJsonNull()) {
+                return root.get("networkId").getAsString().replaceAll("[^0-9]", "");
             }
-
-            root.getAsJsonArray("shards").forEach(element -> {
-                if (!element.isJsonObject()) {
-                    return;
+            if (root.has("shards") && root.get("shards").isJsonArray()) {
+                var shards = root.getAsJsonArray("shards");
+                if (!shards.isEmpty() && shards.get(0).isJsonObject()) {
+                    JsonObject first = shards.get(0).getAsJsonObject();
+                    if (first.has("networkId") && !first.get("networkId").isJsonNull()) {
+                        return first.get("networkId").getAsString().replaceAll("[^0-9]", "");
+                    }
                 }
-                JsonObject shard = element.getAsJsonObject();
-                if (!shard.has("networkId") || shard.get("networkId").isJsonNull()) {
-                    return;
-                }
-                String networkId = shard.get("networkId").getAsString().replaceAll("[^0-9]", "");
-                if (!networkId.isBlank()) {
-                    ids.add(networkId);
-                }
-            });
+            }
         } catch (Exception exception) {
             if (config.debugLogging()) {
-                geyser.getLogger().warning("[proxy-bridge] Failed to read persisted NetherNet identities: " + exception.getMessage());
+                geyser.getLogger().warning("[proxy-bridge] Failed to read the persisted NetherNet identity: " + exception.getMessage());
             }
         }
 
-        return ids;
+        return "";
     }
 
     private @Nullable GeyserPingInfo resolvePingInfo() {
