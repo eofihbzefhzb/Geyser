@@ -60,11 +60,8 @@ public final class PortalNetherNetServer implements AutoCloseable {
         return new NetherNetXboxRpcSignaling(authHeader);
     }
 
-    // authHeaderFile is the per-shard cache file (e.g. cache_Jimmy.json for a sub-session).
-    // Each shard MUST resolve its own file here - reading config.xboxAuthHeaderFile() (the
-    // single primary-account fallback) for every shard means every sub-session tries to
-    // authenticate as the primary account, or with no header at all if only the
-    // xbox-auth-header-files list is configured, both of which Xbox rejects with 401.
+    // authHeaderFile is the MCXboxBroadcast cache holding the Xbox token this ingress
+    // authenticates with. It falls back to config.xboxAuthHeaderFile() when empty.
     private static String resolveAuthHeader(GeyserImpl geyser, PortalBridgeConfig config, String authHeaderFile) {
         if (!config.xboxAuthHeader().isBlank()) {
             return config.xboxAuthHeader();
@@ -76,7 +73,7 @@ public final class PortalNetherNetServer implements AutoCloseable {
         }
 
         // The publisher (e.g. MCXboxBroadcast) may still be finishing its own auth flow
-        // for this account/sub-session when Geyser starts, so the cache file this shard
+        // for this account when Geyser starts, so the cache file this ingress
         // needs might not exist, be fully written, or have reached the minecraftSession
         // step of that auth flow yet. Retry for up to a minute instead of giving up on
         // the very first read, and report exactly which of those is the case so a
@@ -170,20 +167,18 @@ public final class PortalNetherNetServer implements AutoCloseable {
             .childOption(ChannelOption.TCP_NODELAY, false)
             .childHandler(this.initializer);
 
-        // Name the shard/account in both the success and failure paths. With several
-        // shards, a bare "401 Unauthorized" from the bind below gives no indication of
-        // WHICH account's token Xbox rejected, and the shards that already bound
-        // successfully have logged an indistinguishable success line.
-        String shardLabel = this.authHeaderFile.isBlank() ? "<config header>" : this.authHeaderFile;
-        // Log the shard BEFORE binding. Wrapping the failure afterwards is unreliable here:
+        // Name the account in both the success and failure paths: a bare "401 Unauthorized"
+        // from the bind below gives no indication of which token Xbox rejected.
+        String authLabel = this.authHeaderFile.isBlank() ? "<config header>" : this.authHeaderFile;
+        // Log it BEFORE binding. Wrapping the failure afterwards is unreliable here:
         // Netty rethrows the original exception instance from the event-loop thread, so the
-        // logged stack trace can hide which shard was in flight. A plain "attempting" line
-        // means the last one printed before an error is always the shard that failed.
-        // Only under debug-logging: the success line below already names the shard, and the
-        // failure path names it too, so on a retry loop this was three extra INFO lines every
+        // logged stack trace can hide which auth source was in flight. A plain "attempting"
+        // line means the last one printed before an error is always the one that failed.
+        // Only under debug-logging: the success line below already names the auth source, and
+        // the failure path names it too, so on a retry loop this was an extra INFO line every
         // pass for no new information.
         if (config.debugLogging()) {
-            this.geyser.getLogger().info("[proxy-bridge] Binding NetherNet ingress for auth source " + shardLabel
+            this.geyser.getLogger().info("[proxy-bridge] Binding NetherNet ingress for auth source " + authLabel
                 + " (network id " + this.signaling.getLocalNetworkId() + ", token " + shortAuthFingerprint() + ")");
         }
         try {
@@ -191,21 +186,20 @@ public final class PortalNetherNetServer implements AutoCloseable {
         } catch (Throwable throwable) {
             // syncUninterruptibly() rethrows the bind failure as-is, and the Xbox signaling
             // failure is a java.net.ConnectException - a checked exception, NOT a
-            // RuntimeException - so this must catch Throwable or the shard context below
+            // RuntimeException - so this must catch Throwable or the auth context below
             // is silently lost and the log shows a bare, unattributable 401.
-            throw new IllegalStateException("NetherNet ingress failed to bind for auth source " + shardLabel
+            throw new IllegalStateException("NetherNet ingress failed to bind for auth source " + authLabel
                 + " (network id " + this.signaling.getLocalNetworkId() + ", token " + shortAuthFingerprint() + ")", throwable);
         }
         this.geyser.getLogger().info("[proxy-bridge] NetherNet ingress started with network ID " + this.signaling.getLocalNetworkId()
-            + " for auth source " + shardLabel + " (token " + shortAuthFingerprint() + ")");
+            + " for auth source " + authLabel + " (token " + shortAuthFingerprint() + ")");
         if (config.debugLogging()) {
             this.geyser.getLogger().info("[proxy-bridge] NetherNet control channel bound through Xbox signaling and local server bootstrap.");
         }
     }
 
     /**
-     * Short, non-secret tag for the token this shard is using, so two shards that are
-     * unintentionally authenticating as the same Xbox account are visible in the log.
+     * Short, non-secret tag for the token in use, so an unexpected account shows up in the log.
      */
     private String shortAuthFingerprint() {
         String fingerprint = authHeaderFingerprint(this.geyser, this.config, this.authHeaderFile);
@@ -301,7 +295,7 @@ public final class PortalNetherNetServer implements AutoCloseable {
             this.channel = null;
         }
         this.signaling.close();
-        // The event loop groups are shared between shards and shut down by the bootstrap.
+        // The event loop groups are owned and shut down by the bootstrap.
         // On shutdown the peers are going away with the process, so disposing inline is fine;
         // drain anything the reaper is still holding so nothing is left allocated.
         disposeQuietly(this.peerConnectionFactory);
@@ -347,8 +341,7 @@ public final class PortalNetherNetServer implements AutoCloseable {
     }
 
     /**
-     * @return the per-shard Xbox auth cache file this server authenticates with, so the
-     * bootstrap can reload only the shard whose token actually changed.
+     * @return the Xbox auth cache file this server authenticates with.
      */
     public String authHeaderFile() {
         return this.authHeaderFile;

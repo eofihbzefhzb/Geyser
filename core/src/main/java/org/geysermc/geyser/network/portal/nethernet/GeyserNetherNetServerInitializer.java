@@ -15,7 +15,7 @@ public final class GeyserNetherNetServerInitializer extends NetherNetBedrockChan
     private static final boolean PROXY_BRIDGE_DEBUG = Boolean.parseBoolean(System.getProperty("Geyser.ProxyBridgeDebug", "false"));
 
     private final GeyserImpl geyser;
-    /** Shared across all shards; owned and shut down by PortalBridgeBootstrap. */
+    /** Owned and shut down by PortalBridgeBootstrap. */
     private final EventLoopGroup playerGroup;
 
     public GeyserNetherNetServerInitializer(GeyserImpl geyser, EventLoopGroup playerGroup) {

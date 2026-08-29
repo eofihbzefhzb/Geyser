@@ -29,7 +29,6 @@ advanced:
       enabled: true
       xbox-auth-header-file: /absolute/path/to/mcxbox-standalone/cache/cache.json
       nether-net-network-id: ''
-      shard-count: 1
       debug-logging: false
 ```
 
