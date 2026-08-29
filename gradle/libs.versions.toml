@@ -45,7 +45,10 @@ mixin = "0.8.5"
 mixinextras = "0.5.3"
 minecraft = "26.2"
 mockito = "5.+"
-nethernet = "1.7.3"
+# Fork: github.com/eofihbzefhzb/NetworkCompatible - resolves the peer address from ICE
+# candidates instead of leaving every NetherNet channel on 0.0.0.0.
+# Built with `gradlew publishToMavenLocal` in that repo.
+nethernet = "1.7.3-ip.1"
 webrtc = "1.0.3"
 
 # plugin versions

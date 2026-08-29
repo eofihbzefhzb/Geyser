@@ -26,7 +26,10 @@ dependencies {
 }
 
 repositories {
-    // mavenLocal()
+    // Resolves the forked netty-transport-nethernet (see libs.versions.toml). Must come first:
+    // Maven Central still carries upstream's 1.7.3, and the fork is versioned 1.7.3-ip.x so the
+    // two never collide, but keeping mavenLocal ahead avoids a needless remote lookup.
+    mavenLocal()
 
     mavenCentral()
 
