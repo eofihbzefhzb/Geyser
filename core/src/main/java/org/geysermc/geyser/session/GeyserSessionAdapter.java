@@ -130,8 +130,11 @@ public class GeyserSessionAdapter extends SessionAdapter {
         session.loggedIn = true;
 
         if (session.isProxyBridgeIngress()) {
-            geyser.getLogger().info("[proxy-bridge] Java/Paper connection established for "
-                + session.bedrockUsername());
+            // The single production line for a NetherNet join, and the only place the resolved
+            // peer address is stated: Geyser's own connect message just below reports the
+            // backend, not where the Bedrock player came from.
+            geyser.getLogger().info("[proxy-bridge] " + session.bedrockUsername()
+                + " joined over NetherNet from " + session.getUpstream().getAddress());
         }
 
         if (session.getDownstream().getSession() instanceof LocalSession) {

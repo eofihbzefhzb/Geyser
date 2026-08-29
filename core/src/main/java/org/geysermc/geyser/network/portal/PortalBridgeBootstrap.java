@@ -85,7 +85,10 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
                 + "NetherNet ingress trust does not depend on this list.");
         }
 
-        if (config.debugLogging()) {
+        // Only worth stating when there is something to state; the empty case is already
+        // covered by the message above, which printed "…rules are configured" immediately
+        // followed by "Trusted proxy rules: 0".
+        if (config.debugLogging() && !configuredRules.isEmpty()) {
             geyser.getLogger().info("[proxy-bridge] Trusted proxy rules: " + configuredRules.size());
         }
 

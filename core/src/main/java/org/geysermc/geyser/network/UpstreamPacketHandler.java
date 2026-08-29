@@ -88,6 +88,16 @@ import java.util.concurrent.TimeUnit;
 public class UpstreamPacketHandler extends LoggingPacketHandler {
     private static final boolean PROXY_BRIDGE_DEBUG = Boolean.parseBoolean(System.getProperty("Geyser.ProxyBridgeDebug", "false"));
 
+    /**
+     * A join crosses several stages, but only the last one is news in production: the rest are
+     * either implied by it or, on failure, reported by the failure itself. Gating the intermediate
+     * ones keeps a busy server from writing five lines per player for a join that simply worked.
+     */
+    private boolean bridgeTraceEnabled() {
+        return session.isProxyBridgeIngress()
+            && geyser.config().advanced().bedrock().portalBridge().debugLogging();
+    }
+
     private boolean networkSettingsRequested = false;
     private boolean receivedLoginPacket = false;
     private boolean finishedResourcePackSending = false;
@@ -211,7 +221,7 @@ public class UpstreamPacketHandler extends LoggingPacketHandler {
         receivedLoginPacket = true;
 
         LoginEncryptionUtils.encryptPlayerConnection(session, loginPacket);
-        if (session.isProxyBridgeIngress()) {
+        if (bridgeTraceEnabled()) {
             geyser.getLogger().info("[proxy-bridge] Bedrock authentication completed; Floodgate handoff ready for "
                 + session.bedrockUsername());
         }
@@ -269,7 +279,7 @@ public class UpstreamPacketHandler extends LoggingPacketHandler {
         resourcePacksInfo.setWorldTemplateVersion("");
 
         session.sendUpstreamPacket(resourcePacksInfo);
-        if (session.isProxyBridgeIngress()) {
+        if (bridgeTraceEnabled()) {
             // Last thing Geyser sends before it can only wait. If no
             // "resource pack response" line follows this one, the client stopped talking here.
             geyser.getLogger().info("[proxy-bridge] resource pack info sent to " + session.bedrockUsername()
@@ -284,7 +294,7 @@ public class UpstreamPacketHandler extends LoggingPacketHandler {
 
     @Override
     public PacketSignal handle(ResourcePackClientResponsePacket packet) {
-        if (session.isProxyBridgeIngress()) {
+        if (bridgeTraceEnabled()) {
             // Logged before any early-return so a REFUSED/SEND_PACKS answer, or one arriving on a
             // half-closed session, is still visible. Only COMPLETED continues the login.
             geyser.getLogger().info("[proxy-bridge] resource pack response from " + session.bedrockUsername()
@@ -304,7 +314,7 @@ public class UpstreamPacketHandler extends LoggingPacketHandler {
             case COMPLETED -> {
                 finishedResourcePackSending = true;
                 if (geyser.config().java().authType() != AuthType.ONLINE) {
-                    if (session.isProxyBridgeIngress()) {
+                    if (bridgeTraceEnabled()) {
                         geyser.getLogger().info("[proxy-bridge] Floodgate authentication completed for "
                             + session.bedrockUsername());
                     }
