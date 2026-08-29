@@ -269,6 +269,14 @@ public class UpstreamPacketHandler extends LoggingPacketHandler {
         resourcePacksInfo.setWorldTemplateVersion("");
 
         session.sendUpstreamPacket(resourcePacksInfo);
+        if (session.isProxyBridgeIngress()) {
+            // Last thing Geyser sends before it can only wait. If no
+            // "resource pack response" line follows this one, the client stopped talking here.
+            geyser.getLogger().info("[proxy-bridge] resource pack info sent to " + session.bedrockUsername()
+                + " (packs=" + resourcePacksInfo.getResourcePackInfos().size()
+                + ", forcedToAccept=" + resourcePacksInfo.isForcedToAccept()
+                + ", integratedPack=" + resourcePackLoadEvent.isIntegratedPackActive() + ")");
+        }
 
         GeyserLocale.loadGeyserLocale(session.locale());
         return PacketSignal.HANDLED;
@@ -276,6 +284,13 @@ public class UpstreamPacketHandler extends LoggingPacketHandler {
 
     @Override
     public PacketSignal handle(ResourcePackClientResponsePacket packet) {
+        if (session.isProxyBridgeIngress()) {
+            // Logged before any early-return so a REFUSED/SEND_PACKS answer, or one arriving on a
+            // half-closed session, is still visible. Only COMPLETED continues the login.
+            geyser.getLogger().info("[proxy-bridge] resource pack response from " + session.bedrockUsername()
+                + ": status=" + packet.getStatus()
+                + (session.isClosed() || session.getUpstream().isClosed() ? " (session already closed)" : ""));
+        }
         if (session.getUpstream().isClosed() || session.isClosed()) {
             return PacketSignal.HANDLED;
         }

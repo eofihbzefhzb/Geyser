@@ -48,8 +48,11 @@ public final class GeyserNetherNetServerInitializer extends NetherNetBedrockChan
                 Channel channel = bedrockServerSession.getPeer().getChannel();
                 channel.pipeline().addAfter(BedrockPacketCodec.NAME, InvalidPacketHandler.NAME, new InvalidPacketHandler(session));
                 if (this.geyser.config().advanced().bedrock().portalBridge().debugLogging()) {
+                    long openedAt = System.currentTimeMillis();
                     channel.closeFuture().addListener(future -> this.geyser.getLogger().info(
-                        "[proxy-bridge] NetherNet Bedrock transport closed remote=" + bedrockServerSession.getSocketAddress()));
+                        "[proxy-bridge] NetherNet Bedrock transport closed after "
+                            + (System.currentTimeMillis() - openedAt) + "ms, spawned=" + session.isSpawned()
+                            + (future.cause() != null ? ", cause: " + future.cause() : ", no error (peer went away)")));
                 }
             }
 
