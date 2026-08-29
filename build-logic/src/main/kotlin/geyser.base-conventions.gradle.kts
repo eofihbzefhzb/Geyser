@@ -26,12 +26,19 @@ dependencies {
 }
 
 repositories {
-    // Resolves the forked netty-transport-nethernet (see libs.versions.toml). Must come first:
-    // Maven Central still carries upstream's 1.7.3, and the fork is versioned 1.7.3-ip.x so the
-    // two never collide, but keeping mavenLocal ahead avoids a needless remote lookup.
-    mavenLocal()
+    // mavenLocal()
 
     mavenCentral()
+
+    // Builds github.com/eofihbzefhzb/NetworkCompatible on demand from its release tag.
+    // Used instead of Maven Central for netty-transport-nethernet: the fork resolves the
+    // NetherNet peer address from ICE candidates, and publishing to Central would need the
+    // dev.kastle namespace. Restricted to that one group so nothing else resolves here.
+    maven("https://jitpack.io") {
+        content {
+            includeGroup("com.github.eofihbzefhzb.NetworkCompatible")
+        }
+    }
 
     // Floodgate, Cumulus etc.
     maven("https://repo.opencollab.dev/main")

@@ -47,7 +47,7 @@ minecraft = "26.2"
 mockito = "5.+"
 # Fork: github.com/eofihbzefhzb/NetworkCompatible - resolves the peer address from ICE
 # candidates instead of leaving every NetherNet channel on 0.0.0.0.
-# Built with `gradlew publishToMavenLocal` in that repo.
+# Served by JitPack from the matching release tag, so this value IS the tag name.
 nethernet = "1.7.3-ip.1"
 webrtc = "1.0.3"
 
@@ -99,7 +99,7 @@ adventure-text-serializer-plain = { group = "net.kyori", name = "adventure-text-
 
 netty-codec-haproxy = { group = "io.netty", name = "netty-codec-haproxy", version.ref = "netty" }
 netty-handler = { group = "io.netty", name = "netty-handler", version.ref = "netty" }
-netty-transport-nethernet = { group = "dev.kastle.netty", name = "netty-transport-nethernet", version.ref = "nethernet" }
+netty-transport-nethernet = { group = "com.github.eofihbzefhzb.NetworkCompatible", name = "netty-transport-nethernet", version.ref = "nethernet" }
 webrtc = { group = "dev.kastle.webrtc", name = "webrtc-java", version.ref = "webrtc" }
 netty-transport-native-epoll = { group = "io.netty", name = "netty-transport-native-epoll", version.ref = "netty" }
 netty-transport-native-kqueue = { group = "io.netty", name = "netty-transport-native-kqueue", version.ref = "netty" }
