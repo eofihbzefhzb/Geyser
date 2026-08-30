@@ -31,15 +31,12 @@ import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.util.concurrent.DefaultThreadFactory;
 
 /**
- * The Netty thread pools shared by every NetherNet ingress shard.
+ * The Netty thread pools backing NetherNet ingress.
  * <p>
- * These used to be allocated per shard. Each {@code PortalNetherNetServer} carried its own
- * acceptor, worker, and player groups, and the two unbounded ones default to
- * {@code availableProcessors() * 2} threads each - so a three-shard setup on an eight-core
- * machine started roughly a hundred threads to serve a handful of signaling channels, and
- * every shard reload churned another set. Shards are independent at the Xbox/signaling
- * level but have no reason to be independent at the thread level, so they share one set of
- * pools owned by {@link org.geysermc.geyser.network.portal.PortalBridgeBootstrap}.
+ * Owned by {@link org.geysermc.geyser.network.portal.PortalBridgeBootstrap} rather than by the
+ * server itself, so a signaling reload swaps the channel without churning threads: the two
+ * unbounded groups default to {@code availableProcessors() * 2} each, which is a lot to tear
+ * down and rebuild every time an Xbox token refreshes.
  */
 public final class NetherNetEventLoops implements AutoCloseable {
     private final EventLoopGroup bossGroup =
@@ -50,7 +47,7 @@ public final class NetherNetEventLoops implements AutoCloseable {
         new DefaultEventLoopGroup(0, new DefaultThreadFactory("GeyserNetherNetPlayer", true));
 
     /**
-     * @return the acceptor group for the shards' signaling channels.
+     * @return the acceptor group for the signaling channel.
      */
     public EventLoopGroup bossGroup() {
         return bossGroup;

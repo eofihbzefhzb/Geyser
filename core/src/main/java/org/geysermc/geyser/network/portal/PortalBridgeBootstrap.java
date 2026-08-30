@@ -105,7 +105,7 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
      * Mutes dev.kastle's own signaling logger.
      * <p>
      * That library logs the full websocket handshake stacktrace itself on every failed bind, so a
-     * rejected token produced two stacktraces per shard per retry. The standalone bootstrap silences
+     * rejected token produced two stacktraces per retry. The standalone bootstrap silences
      * it through log4j2.xml, but this fork runs on Velocity, which uses its own logging config, so
      * the level has to be set programmatically here. Done reflectively and best-effort: if Log4j core
      * is not reachable the bridge still works, the log is just noisier.
@@ -142,8 +142,8 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
             closeNetherNetServersOnly();
             long delay = retryDelaySeconds(attempt);
             // Log the reason once, then stay quiet. Passing the throwable here printed a full
-            // stacktrace per shard per attempt - with 3 shards retrying every 10s that is 6
-            // stacktraces every 10 seconds forever, which buries every other line in the log.
+            // full stacktrace on every attempt, and the retry loop never stops, which buries
+            // every other line in the log.
             if (attempt == 1) {
                 geyser.getLogger().error("[proxy-bridge] NetherNet ingress could not start: " + rootMessage(throwable)
                     + " Retrying in the background; no further attempts will be logged until one succeeds.");
@@ -257,11 +257,7 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
                     return;
                 }
 
-                // Reload ONLY the shards whose own token changed. The combined fingerprint
-                // changes whenever ANY account refreshes, so reloading every shard here meant
-                // one account's routine token refresh tore down and rebuilt the signaling
-                // channel - and allocated a fresh native PeerConnectionFactory - for every
-                // other shard too, repeatedly, for no reason.
+                // Reload only when this ingress' own token actually changed.
                 if (this.netherNetServer != null) {
                     geyser.getLogger().info("[proxy-bridge] Xbox auth source changed; reloading NetherNet signaling.");
                     this.netherNetServer.reloadSignaling();

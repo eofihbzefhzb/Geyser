@@ -10,6 +10,9 @@ import dev.kastle.webrtc.PeerConnectionFactory;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelOption;
+import io.netty.channel.group.ChannelGroup;
+import io.netty.channel.group.DefaultChannelGroup;
+import io.netty.util.concurrent.GlobalEventExecutor;
 import org.geysermc.geyser.GeyserImpl;
 import org.geysermc.geyser.configuration.PortalBridgeConfig;
 
@@ -27,6 +30,9 @@ public final class PortalNetherNetServer implements AutoCloseable {
     private final String authHeaderFile;
     private static final long DISPOSAL_CHECK_SECONDS = 30;
     private static final int MAX_DISPOSAL_ATTEMPTS = 20; // ~10 minutes, then free regardless.
+    /** Peers accepted on the current signaling generation. Swapped on every reload. */
+    private volatile ChannelGroup activeChildren =
+        new DefaultChannelGroup("nethernet-peers", GlobalEventExecutor.INSTANCE);
     /** Factories retired by a reload, awaiting a safe moment to free their native handle. */
     private final java.util.Set<PeerConnectionFactory> retiredFactories =
         java.util.concurrent.ConcurrentHashMap.newKeySet();
@@ -44,7 +50,7 @@ public final class PortalNetherNetServer implements AutoCloseable {
         this.eventLoops = eventLoops;
         this.authHeaderFile = authHeaderFile == null ? "" : authHeaderFile;
         this.configuredNetworkId = configuredNetworkId == null ? "" : configuredNetworkId;
-        this.initializer = new GeyserNetherNetServerInitializer(geyser, eventLoops.playerGroup());
+        this.initializer = new GeyserNetherNetServerInitializer(geyser, eventLoops.playerGroup(), () -> this.activeChildren);
         this.peerConnectionFactory = new PeerConnectionFactory();
         NetherNetXboxRpcSignaling rawSignaling = createSignaling(geyser, config, this.authHeaderFile, this.configuredNetworkId);
         this.signaling = config.debugLogging()
@@ -261,6 +267,11 @@ public final class PortalNetherNetServer implements AutoCloseable {
             throw throwable;
         }
 
+        // Peers accepted from here on belong to the new generation; the ones already running stay
+        // in the old group, which is what the reaper watches before freeing the old factory.
+        ChannelGroup retiredChildren = this.activeChildren;
+        this.activeChildren = new DefaultChannelGroup("nethernet-peers", GlobalEventExecutor.INSTANCE);
+
         this.channel = newChannel;
         this.signaling = newSignaling;
         this.peerConnectionFactory = newPeerConnectionFactory;
@@ -275,7 +286,7 @@ public final class PortalNetherNetServer implements AutoCloseable {
         // peers are still using, so a token refresh while anyone was connected could take the
         // JVM down with a native fault rather than a Java exception. Hand it to the reaper
         // instead, which disposes it once no session is left on it.
-        scheduleDisposal(oldPeerConnectionFactory);
+        scheduleDisposal(oldPeerConnectionFactory, retiredChildren);
 
         this.geyser.getLogger().info("[proxy-bridge] NetherNet signaling reloaded for " + this.authHeaderFile + ", new network ID " + this.signaling.getLocalNetworkId());
     }
@@ -314,25 +325,41 @@ public final class PortalNetherNetServer implements AutoCloseable {
      * never fully closes would pin one factory per token refresh forever - the leak this is
      * meant to avoid.
      */
-    private void scheduleDisposal(PeerConnectionFactory factory) {
+    private void scheduleDisposal(PeerConnectionFactory factory, ChannelGroup children) {
         if (factory == null) {
             return;
         }
         this.retiredFactories.add(factory);
-        scheduleDisposalAttempt(factory, 1);
+        scheduleDisposalAttempt(factory, children, 1);
     }
 
-    private void scheduleDisposalAttempt(PeerConnectionFactory factory, int attempt) {
+    private void scheduleDisposalAttempt(PeerConnectionFactory factory, ChannelGroup children, int attempt) {
         this.eventLoops.workerGroup().schedule(() -> {
             if (!this.retiredFactories.contains(factory)) {
                 return;
             }
-            if (this.geyser.getSessionManager().getAllSessions().isEmpty() || attempt >= MAX_DISPOSAL_ATTEMPTS) {
+            // Watch THIS factory's own peers, not the server's session count. An earlier version
+            // checked whether Geyser had any sessions at all, which on a populated server is never
+            // true - so it always fell through to the attempt cap and freed the factory while its
+            // peers were still live, which is the very thing the delay exists to prevent.
+            if (children.isEmpty()) {
                 this.retiredFactories.remove(factory);
                 disposeQuietly(factory);
                 return;
             }
-            scheduleDisposalAttempt(factory, attempt + 1);
+            if (attempt >= MAX_DISPOSAL_ATTEMPTS) {
+                // Bounded on purpose: a peer that never closes would otherwise pin one native
+                // factory per token refresh forever. Close them first so the handle we free is
+                // no longer in use, rather than freeing it out from under them.
+                this.geyser.getLogger().warning("[proxy-bridge] " + children.size()
+                    + " NetherNet peer(s) still open on a retired signaling channel after "
+                    + (MAX_DISPOSAL_ATTEMPTS * DISPOSAL_CHECK_SECONDS / 60) + " minutes; closing them to release it.");
+                children.close().awaitUninterruptibly(5, TimeUnit.SECONDS);
+                this.retiredFactories.remove(factory);
+                disposeQuietly(factory);
+                return;
+            }
+            scheduleDisposalAttempt(factory, children, attempt + 1);
         }, DISPOSAL_CHECK_SECONDS, TimeUnit.SECONDS);
     }
 
