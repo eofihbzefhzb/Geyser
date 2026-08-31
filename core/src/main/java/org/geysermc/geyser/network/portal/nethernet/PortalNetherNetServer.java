@@ -39,7 +39,7 @@ public final class PortalNetherNetServer implements AutoCloseable {
     private final NetherNetEventLoops eventLoops;
     private final GeyserNetherNetServerInitializer initializer;
     private PeerConnectionFactory peerConnectionFactory;
-    private NetherNetServerSignaling signaling;
+    private volatile NetherNetServerSignaling signaling;
     private final String configuredNetworkId;
     private Channel channel;
 
@@ -367,6 +367,21 @@ public final class PortalNetherNetServer implements AutoCloseable {
         return this.signaling.getLocalNetworkId();
     }
 
+    /**
+     * Whether the Xbox signaling link is still alive.
+     * <p>
+     * When it dies nothing here notices on its own: offers simply stop arriving, which looks exactly
+     * like a quiet server, and the library's own logger is silenced by
+     * {@code PortalBridgeBootstrap#silenceSignalingLibraryLogger()}. Players already connected keep
+     * playing over their existing WebRTC channels, so the only visible symptom is that new joins
+     * hang on "connecting to server" forever.
+     *
+     * @return false once the websocket has dropped, in which case the ingress must be rebound.
+     */
+    public boolean signalingConnected() {
+        return this.signaling.isConnected();
+    }
+
 
     /**
      * Adds stage-only diagnostics around the library signaling callbacks. Signal
@@ -430,6 +445,13 @@ public final class PortalNetherNetServer implements AutoCloseable {
         @Override
         public String getLocalNetworkId() {
             return delegate.getLocalNetworkId();
+        }
+
+        @Override
+        public boolean isConnected() {
+            // Must delegate: the interface default returns true, so forgetting this would report a
+            // dead websocket as healthy whenever debug-logging wraps the real signaling.
+            return delegate.isConnected();
         }
 
         @Override

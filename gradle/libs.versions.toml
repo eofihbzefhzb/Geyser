@@ -48,7 +48,7 @@ mockito = "5.+"
 # Fork: github.com/eofihbzefhzb/NetworkCompatible - resolves the peer address from ICE
 # candidates instead of leaving every NetherNet channel on 0.0.0.0.
 # Served by JitPack from the matching release tag, so this value IS the tag name.
-nethernet = "1.7.3-ip.2"
+nethernet = "1.7.3-ip.3"
 webrtc = "1.0.3"
 
 # plugin versions

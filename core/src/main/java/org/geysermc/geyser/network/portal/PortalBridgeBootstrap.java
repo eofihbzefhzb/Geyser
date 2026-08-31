@@ -64,6 +64,9 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
     private @Nullable ScheduledExecutorService statusWriterExecutor;
     private @Nullable ScheduledExecutorService startupRetryExecutor;
     private static final long STARTUP_RETRY_DELAY_SECONDS = 10;
+    /** Minimum gap between two attempts to rebind a dropped signaling websocket. */
+    private static final long SIGNALING_REBIND_COOLDOWN_MS = 30_000;
+    private volatile long lastSignalingRebindAttempt;
     private @Nullable PortalNetherNetServer netherNetServer;
     private final NetherNetEventLoops eventLoops = new NetherNetEventLoops();
     private volatile String authHeaderFingerprint = "";
@@ -234,6 +237,55 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
         writeStatusFile();
         this.statusWriterExecutor.scheduleWithFixedDelay(this::writeStatusFile, 5, 5, TimeUnit.SECONDS);
         this.statusWriterExecutor.scheduleWithFixedDelay(this::reloadSignalingIfAuthChanged, 2, 2, TimeUnit.SECONDS);
+        this.statusWriterExecutor.scheduleWithFixedDelay(this::rebindSignalingIfDisconnected, 15, 15, TimeUnit.SECONDS);
+    }
+
+    /**
+     * Rebinds the ingress when its Xbox signaling websocket has gone away.
+     * <p>
+     * The websocket can drop on its own - a network blip, or Xbox closing an idle connection - and
+     * the transport does not reconnect it: {@code AbstractNetherNetXboxSignaling#channelInactive}
+     * just clears the channel. Until this ran, the only recovery was restarting Geyser, and there
+     * was nothing in the log to explain why: offers stop arriving, which is indistinguishable from
+     * nobody trying to join, and the library's own logger is silenced on purpose.
+     * <p>
+     * {@link PortalNetherNetServer#reloadSignaling()} already does the right thing here - it binds a
+     * fresh signaling channel and leaves every established peer untouched - so this only has to
+     * supply the trigger it was missing.
+     */
+    private void rebindSignalingIfDisconnected() {
+        try {
+            PortalNetherNetServer server = this.netherNetServer;
+            if (server == null || server.signalingConnected()) {
+                return;
+            }
+
+            synchronized (this) {
+                // Re-read under the lock: an auth-change reload may have just replaced the signaling.
+                server = this.netherNetServer;
+                if (server == null || server.signalingConnected()) {
+                    return;
+                }
+
+                // Bounded retries. A rebind that fails because Xbox is unreachable would otherwise
+                // be retried every 15 seconds forever, and each attempt opens a websocket.
+                long now = System.currentTimeMillis();
+                if (now - this.lastSignalingRebindAttempt < SIGNALING_REBIND_COOLDOWN_MS) {
+                    return;
+                }
+                this.lastSignalingRebindAttempt = now;
+
+                geyser.getLogger().warning("[proxy-bridge] NetherNet signaling websocket is down; no new player can join. "
+                    + "Rebinding it - players already connected are not affected.");
+                server.reloadSignaling();
+                writeIdentityFile();
+                writeStatusFile();
+                geyser.getLogger().info("[proxy-bridge] NetherNet signaling rebound; joins should work again.");
+            }
+        } catch (Throwable throwable) {
+            geyser.getLogger().error("[proxy-bridge] Failed to rebind the NetherNet signaling websocket: "
+                + rootMessage(throwable) + " Retrying in " + (SIGNALING_REBIND_COOLDOWN_MS / 1000) + "s.");
+        }
     }
 
     private String computeCombinedFingerprint() {
