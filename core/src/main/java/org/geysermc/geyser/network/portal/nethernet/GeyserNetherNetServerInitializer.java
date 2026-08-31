@@ -8,15 +8,13 @@ import java.util.function.Supplier;
 import org.checkerframework.checker.nullness.qual.NonNull;
 import org.cloudburstmc.protocol.bedrock.BedrockPeer;
 import org.cloudburstmc.protocol.bedrock.BedrockServerSession;
-import org.cloudburstmc.protocol.bedrock.netty.codec.packet.BedrockPacketCodec;
+
 import org.geysermc.geyser.GeyserImpl;
 import org.geysermc.geyser.network.InvalidPacketHandler;
 import org.geysermc.geyser.network.UpstreamPacketHandler;
 import org.geysermc.geyser.session.GeyserSession;
 
 public final class GeyserNetherNetServerInitializer extends NetherNetBedrockChannelInitializer<BedrockServerSession> {
-    private static final boolean PROXY_BRIDGE_DEBUG = Boolean.parseBoolean(System.getProperty("Geyser.ProxyBridgeDebug", "false"));
-
     private final GeyserImpl geyser;
     /** Owned and shut down by PortalBridgeBootstrap. */
     private final EventLoopGroup playerGroup;
@@ -50,11 +48,6 @@ public final class GeyserNetherNetServerInitializer extends NetherNetBedrockChan
     @Override
     protected void initSession(@NonNull BedrockServerSession bedrockServerSession) {
         try {
-            if (PROXY_BRIDGE_DEBUG) {
-                this.geyser.getLogger().info("[proxy-bridge] NetherNet peer connected");
-                this.geyser.getLogger().info("[proxy-bridge] nethernet initSession remote=" + bedrockServerSession.getSocketAddress());
-            }
-
             bedrockServerSession.setLogging(this.geyser.config().debugMode());
             GeyserSession session = new GeyserSession(this.geyser, bedrockServerSession, this.playerGroup.next());
             session.setProxyBridgeIngress(true);
@@ -65,7 +58,10 @@ public final class GeyserNetherNetServerInitializer extends NetherNetBedrockChan
 
             if (!bedrockServerSession.isSubClient()) {
                 Channel channel = bedrockServerSession.getPeer().getChannel();
-                channel.pipeline().addAfter(BedrockPacketCodec.NAME, InvalidPacketHandler.NAME, new InvalidPacketHandler(session));
+                // After BedrockPeer, not BedrockPacketCodec: the peer is the last handler in the
+                // pipeline, so exceptions thrown while it dispatches to the packet handler only
+                // reach InvalidPacketHandler if it sits behind the peer.
+                channel.pipeline().addAfter(BedrockPeer.NAME, InvalidPacketHandler.NAME, new InvalidPacketHandler(session));
                 if (this.geyser.config().advanced().bedrock().portalBridge().debugLogging()) {
                     long openedAt = System.currentTimeMillis();
                     channel.closeFuture().addListener(future -> this.geyser.getLogger().info(

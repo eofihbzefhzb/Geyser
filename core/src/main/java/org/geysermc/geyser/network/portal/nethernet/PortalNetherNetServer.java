@@ -367,12 +367,6 @@ public final class PortalNetherNetServer implements AutoCloseable {
         return this.signaling.getLocalNetworkId();
     }
 
-    /**
-     * @return the Xbox auth cache file this server authenticates with.
-     */
-    public String authHeaderFile() {
-        return this.authHeaderFile;
-    }
 
     /**
      * Adds stage-only diagnostics around the library signaling callbacks. Signal

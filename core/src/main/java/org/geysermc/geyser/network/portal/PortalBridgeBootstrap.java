@@ -202,9 +202,6 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
         return false;
     }
 
-    public int trustedProxyRuleCount() {
-        return trustedProxyMatchers.size();
-    }
 
     @Override
     public void close() {
