@@ -11,15 +11,15 @@ Geyser is an [Open Collaboration](https://opencollaboration.dev/) project.
 ## MCXboxBroadcast NetherNet ingress
 
 This fork includes a portal-style NetherNet ingress designed to pair with the
-[MCXboxBroadcast standalone publisher](https://github.com/arti-inc/Broadcaster).
+[MCXboxBroadcast standalone publisher](https://github.com/eofihbzefhzb/Broadcaster).
 Geyser owns the Bedrock/NetherNet gameplay connection; MCXboxBroadcast only
 publishes the Xbox session. Do not run a second Bedrock relay for the same
 session.
 
 ### Minimal paired configuration
 
-Install this fork as `Geyser-Spigot.jar` alongside Floodgate and ViaVersion on
-Paper. In `config.yml`, set the portal bridge under
+Install this fork as `Geyser-Velocity.jar` alongside Floodgate and ViaVersion on
+Velocity. In `config.yml`, set the portal bridge under
 `advanced.bedrock.portal-bridge`:
 
 ```yaml
@@ -39,16 +39,16 @@ Geyser generates/persists the active ID and writes an atomic
 the ID before publishing a session.
 
 Use `external-hosted: true` and an empty `external-network-id` in the
-MCXboxBroadcast config. Start Paper/Geyser before the publisher, or use the
+MCXboxBroadcast config. Start Velocity/Geyser before the publisher, or use the
 paired local launcher. The publisher waits for Geyser readiness, so manual
 NetherNet ID copying is unnecessary.
 
 For complete directory layout, friend-safety defaults, joining instructions,
 and stage-by-stage troubleshooting, see the companion
-[setup guide](https://github.com/arti-inc/Broadcaster#reliable-geyser--mcxboxbroadcast-setup).
+[setup guide](https://github.com/eofihbzefhzb/Broadcaster#reliable-geyser--mcxboxbroadcast-setup).
 
 The tested companion artifact is available from the
-[NetherNet ingress release](https://github.com/arti-inc/Geyser-Nethernet-for-mcxb/releases/tag/nethernet-ingress-2).
+[NetherNet ingress release](https://github.com/eofihbzefhzb/Geyser/releases/latest).
 
 ## What is Geyser?
 Geyser is a proxy, bridging the gap between Minecraft: Bedrock Edition and Minecraft: Java Edition servers.
