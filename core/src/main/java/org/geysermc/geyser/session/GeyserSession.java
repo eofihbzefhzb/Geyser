@@ -2703,7 +2703,16 @@ public class GeyserSession implements GeyserConnection, GeyserCommandSource {
             return 0;
         }
 
-        RakSessionCodec rakSessionCodec = ((RakChildChannel) getUpstream().getSession().getPeer().getChannel()).rakPipeline().get(RakSessionCodec.class);
+        // A NetherNet peer has no RakNet pipeline to read a round-trip time from. This used to cast
+        // blindly, so any command or plugin asking for a Bedrock player's ping threw a
+        // ClassCastException for everyone who joined through the portal bridge - and it surfaced as
+        // "Exception while executing command handler", which points nowhere near the real cause.
+        // 0 is already what this returns for a session whose ping cannot be measured.
+        if (!(getUpstream().getSession().getPeer().getChannel() instanceof RakChildChannel rakChannel)) {
+            return 0;
+        }
+
+        RakSessionCodec rakSessionCodec = rakChannel.rakPipeline().get(RakSessionCodec.class);
         return (int) Math.floor(rakSessionCodec.getPing());
     }
 
