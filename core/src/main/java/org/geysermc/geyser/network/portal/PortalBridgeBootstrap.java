@@ -43,7 +43,6 @@ import java.net.InetSocketAddress;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.Path;
-import java.util.Collection;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -289,14 +288,11 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
         try {
             JsonObject root = new JsonObject();
             GeyserPingInfo pingInfo = resolvePingInfo();
-            String bukkitMotd = resolveBukkitMotd();
-            Integer bukkitPlayers = resolveBukkitOnlinePlayers();
-            Integer bukkitMaxPlayers = resolveBukkitMaxPlayers();
 
-            String primaryMotd = bukkitMotd != null ? bukkitMotd : geyser.config().motd().primaryMotd();
+            String primaryMotd = geyser.config().motd().primaryMotd();
             String secondaryMotd = geyser.config().motd().secondaryMotd();
-            int players = bukkitPlayers != null ? bukkitPlayers : geyser.onlineConnections().size();
-            int maxPlayers = bukkitMaxPlayers != null ? bukkitMaxPlayers : geyser.config().motd().maxPlayers();
+            int players = geyser.onlineConnections().size();
+            int maxPlayers = geyser.config().motd().maxPlayers();
 
             if (geyser.config().motd().passthroughMotd() && pingInfo != null && pingInfo.getDescription() != null) {
                 String[] motd = MessageTranslator.convertMessageLenient(pingInfo.getDescription()).split("\n");
@@ -463,41 +459,6 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
         }
     }
 
-    private @Nullable String resolveBukkitMotd() {
-        try {
-            Class<?> bukkitClass = Class.forName("org.bukkit.Bukkit");
-            Object motd = bukkitClass.getMethod("getMotd").invoke(null);
-            if (motd instanceof String string && !string.isBlank()) {
-                return string.trim();
-            }
-        } catch (Throwable ignored) {
-        }
-        return null;
-    }
-
-    private @Nullable Integer resolveBukkitOnlinePlayers() {
-        try {
-            Class<?> bukkitClass = Class.forName("org.bukkit.Bukkit");
-            Object onlinePlayers = bukkitClass.getMethod("getOnlinePlayers").invoke(null);
-            if (onlinePlayers instanceof Collection<?> collection) {
-                return collection.size();
-            }
-        } catch (Throwable ignored) {
-        }
-        return null;
-    }
-
-    private @Nullable Integer resolveBukkitMaxPlayers() {
-        try {
-            Class<?> bukkitClass = Class.forName("org.bukkit.Bukkit");
-            Object maxPlayers = bukkitClass.getMethod("getMaxPlayers").invoke(null);
-            if (maxPlayers instanceof Integer integer) {
-                return integer;
-            }
-        } catch (Throwable ignored) {
-        }
-        return null;
-    }
 
     private static List<String> copyRules(@Nullable List<String> configuredRules) {
         if (configuredRules == null || configuredRules.isEmpty()) {
