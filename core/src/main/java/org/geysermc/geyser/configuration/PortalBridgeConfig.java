@@ -28,7 +28,7 @@ package org.geysermc.geyser.configuration;
 import org.spongepowered.configurate.objectmapping.ConfigSerializable;
 import org.spongepowered.configurate.objectmapping.meta.Comment;
 
-import java.util.Collections;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
@@ -44,7 +44,7 @@ public final class PortalBridgeConfig {
         into Geyser for portal bridge sessions.
         Keep this empty unless you control the ingress adapter and have blocked direct public access to this
         Geyser instance.""")
-    private List<String> trustedProxyIps;
+    private List<String> trustedProxyIps = new ArrayList<>();
 
     @Comment("""
         Whether to emit extra portal bridge startup logging.
@@ -54,24 +54,24 @@ public final class PortalBridgeConfig {
     @Comment("""
         Optional explicit NetherNet network id to bind to.
         Leave empty to let the signaling layer choose one, or set it when you need the bridge to keep a stable Xbox/NetherNet identity across restarts.""")
-    private String netherNetNetworkId;
+    private String netherNetNetworkId = "";
 
     @Comment("""
         Xbox/NetherNet authorization header for the server-side signaling session.
         This is currently required to terminate NetherNet sessions directly inside Geyser until Xbox session management is migrated here too.""")
-    private String xboxAuthHeader;
+    private String xboxAuthHeader = "";
 
     @Comment("""
         Optional path to an MCXboxBroadcast cache.json file.
         If xbox-auth-header is empty, Geyser will read minecraftSession.authorizationHeader from this file at startup.""")
-    private String xboxAuthHeaderFile;
+    private String xboxAuthHeaderFile = "";
 
     public boolean enabled() {
         return enabled;
     }
 
     public List<String> trustedProxyIps() {
-        return Objects.requireNonNullElse(trustedProxyIps, Collections.emptyList());
+        return Objects.requireNonNullElse(trustedProxyIps, List.<String>of());
     }
 
     public boolean debugLogging() {

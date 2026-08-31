@@ -47,8 +47,10 @@ dependencies {
 
     // Network libraries
     implementation(libs.websocket)
-    api(libs.netty.transport.nethernet)
-    api(libs.webrtc)
+    // Only core touches dev.kastle; implementation keeps NetherNet off every bootstrap's
+    // compile classpath while still shading into the built jar via the runtime classpath.
+    implementation(libs.netty.transport.nethernet)
+    implementation(libs.webrtc)
     nativePlatforms.forEach { platform ->
         runtimeOnly(libs.webrtc) {
             artifact {
