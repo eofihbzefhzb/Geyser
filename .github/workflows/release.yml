@@ -85,7 +85,22 @@ jobs:
 
       - name: Generate release notes
         if: ${{ success() && github.ref_name == 'master' }}
-        run: git fetch --tags --force && git log -n 50 --pretty=format:"* %s (%h)" > release_notes.md
+        # Only what is new since the previous build. "git log -n 50" listed the last fifty commits
+        # no matter what had already been published, so every release repeated the entries of the
+        # ones before it and the notes grew without ever dropping anything.
+        env:
+          PREVIOUS_BUILD: ${{ steps.getPreviousBuild.outputs.result }}
+        run: |
+          git fetch --tags --force
+          if [ "$PREVIOUS_BUILD" != "0" ] && git rev-parse -q --verify "refs/tags/$PREVIOUS_BUILD" > /dev/null; then
+            git log "$PREVIOUS_BUILD"..HEAD --pretty=format:"* %s (%h)" > release_notes.md
+          else
+            # No earlier tag to diff against, e.g. the very first release of this fork.
+            git log -n 50 --pretty=format:"* %s (%h)" > release_notes.md
+          fi
+          if [ ! -s release_notes.md ]; then
+            echo "* No code changes since build $PREVIOUS_BUILD" > release_notes.md
+          fi
 
       - name: Create release
         uses: ncipollo/release-action@v1
