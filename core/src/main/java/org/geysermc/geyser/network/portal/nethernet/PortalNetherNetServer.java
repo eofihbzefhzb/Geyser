@@ -299,8 +299,13 @@ public final class PortalNetherNetServer implements AutoCloseable {
         }
     }
 
+    /**
+     * Synchronized on the same monitor as {@link #reloadSignaling()}. Without it a reload already in
+     * flight - the watchdog fires every 15s - could bind a fresh channel and native factory onto a
+     * server being torn down, leaving both allocated with nothing left to close them.
+     */
     @Override
-    public void close() {
+    public synchronized void close() {
         if (this.channel != null) {
             this.channel.close().syncUninterruptibly();
             this.channel = null;

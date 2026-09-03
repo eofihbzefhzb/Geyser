@@ -221,7 +221,12 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
         this.eventLoops.close();
     }
 
-    private void closeNetherNetServersOnly() {
+    /**
+     * Synchronized on the monitor the reload paths use, so a rebind that is already running finishes
+     * before the server is dropped - and one that has not started yet re-reads a null server and
+     * gives up, rather than reviving an ingress that is being shut down.
+     */
+    private synchronized void closeNetherNetServersOnly() {
         if (this.netherNetServer != null) {
             this.netherNetServer.close();
             this.netherNetServer = null;
