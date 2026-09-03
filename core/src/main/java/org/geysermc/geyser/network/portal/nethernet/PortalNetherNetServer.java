@@ -379,7 +379,7 @@ public final class PortalNetherNetServer implements AutoCloseable {
      * @return false once the websocket has dropped, in which case the ingress must be rebound.
      */
     public boolean signalingConnected() {
-        return this.signaling.isConnected();
+        return this.signaling.isActive();
     }
 
 
@@ -448,10 +448,8 @@ public final class PortalNetherNetServer implements AutoCloseable {
         }
 
         @Override
-        public boolean isConnected() {
-            // Must delegate: the interface default returns true, so forgetting this would report a
-            // dead websocket as healthy whenever debug-logging wraps the real signaling.
-            return delegate.isConnected();
+        public boolean isActive() {
+            return delegate.isActive();
         }
 
         @Override
