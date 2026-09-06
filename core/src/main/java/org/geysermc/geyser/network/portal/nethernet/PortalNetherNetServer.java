@@ -29,7 +29,8 @@ public final class PortalNetherNetServer implements AutoCloseable {
     private final PortalBridgeConfig config;
     private final String authHeaderFile;
     private static final long DISPOSAL_CHECK_SECONDS = 30;
-    private static final int MAX_DISPOSAL_ATTEMPTS = 20; // ~10 minutes, then free regardless.
+    /** Attempts after which a still-pinned factory is reported once, so a long wait is visible. */
+    private static final int DISPOSAL_REPORT_ATTEMPTS = 20; // ~10 minutes
     /** Peers accepted on the current signaling generation. Swapped on every reload. */
     private volatile ChannelGroup activeChildren =
         new DefaultChannelGroup("nethernet-peers", GlobalEventExecutor.INSTANCE);
@@ -325,10 +326,15 @@ public final class PortalNetherNetServer implements AutoCloseable {
      * Disposes a retired {@link PeerConnectionFactory} only once nothing is running on it.
      * <p>
      * Freeing it while peers accepted through it are still alive is a native use-after-free, so
-     * the factory is parked and re-checked on a timer. The grace period is bounded: after
-     * {@link #MAX_DISPOSAL_ATTEMPTS} checks the factory is disposed anyway, otherwise a peer that
-     * never fully closes would pin one factory per token refresh forever - the leak this is
-     * meant to avoid.
+     * the factory is parked and re-checked on a timer until its last peer disconnects.
+     * <p>
+     * The wait is deliberately unbounded. It used to give up after ten minutes and close the peers
+     * to reclaim the handle, on the assumption that anything still connected by then was a peer
+     * that would never close. On a populated server that assumption is simply wrong - players stay
+     * for hours - so the cap was disconnecting people mid-game to free a native object, and the
+     * rebind message promising that connected players were unaffected became a lie ten minutes
+     * later. A retired factory costs a little native memory until its players leave, which is worth
+     * far more than kicking them.
      */
     private void scheduleDisposal(PeerConnectionFactory factory, ChannelGroup children) {
         if (factory == null) {
@@ -352,17 +358,14 @@ public final class PortalNetherNetServer implements AutoCloseable {
                 disposeQuietly(factory);
                 return;
             }
-            if (attempt >= MAX_DISPOSAL_ATTEMPTS) {
-                // Bounded on purpose: a peer that never closes would otherwise pin one native
-                // factory per token refresh forever. Close them first so the handle we free is
-                // no longer in use, rather than freeing it out from under them.
+            // Reported once rather than every pass, and never acted on: the players keep playing
+            // and the handle is freed when the last of them disconnects.
+            if (attempt == DISPOSAL_REPORT_ATTEMPTS) {
                 this.geyser.getLogger().warning("[proxy-bridge] " + children.size()
-                    + " NetherNet peer(s) still open on a retired signaling channel after "
-                    + (MAX_DISPOSAL_ATTEMPTS * DISPOSAL_CHECK_SECONDS / 60) + " minutes; closing them to release it.");
-                children.close().awaitUninterruptibly(5, TimeUnit.SECONDS);
-                this.retiredFactories.remove(factory);
-                disposeQuietly(factory);
-                return;
+                    + " NetherNet player(s) have been on a retired signaling channel for "
+                    + (DISPOSAL_REPORT_ATTEMPTS * DISPOSAL_CHECK_SECONDS / 60)
+                    + " minutes; it is freed once they disconnect. "
+                    + this.retiredFactories.size() + " retired channel(s) waiting.");
             }
             scheduleDisposalAttempt(factory, children, attempt + 1);
         }, DISPOSAL_CHECK_SECONDS, TimeUnit.SECONDS);
