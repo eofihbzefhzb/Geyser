@@ -40,9 +40,6 @@ public interface TooltipOptions {
     boolean showInTooltip(DataComponentType<?> component);
 
     static TooltipOptions fromComponents(DataComponents components) {
-        if (components == null) {
-            return ALL_SHOWN;
-        }
         TooltipDisplay display = components.get(DataComponentTypes.TOOLTIP_DISPLAY);
         if (display == null) {
             return ALL_SHOWN;
@@ -56,9 +53,6 @@ public interface TooltipOptions {
     }
 
     static boolean hideTooltip(DataComponents components) {
-        if (components == null) {
-            return false;
-        }
         TooltipDisplay display = components.get(DataComponentTypes.TOOLTIP_DISPLAY);
         return display != null && display.hideTooltip();
     }

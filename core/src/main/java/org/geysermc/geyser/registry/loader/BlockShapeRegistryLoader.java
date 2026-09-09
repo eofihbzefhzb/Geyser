@@ -67,13 +67,7 @@ public class BlockShapeRegistryLoader implements RegistryLoader<String, List<Bou
                 collisions.add(null);
                 continue;
             }
-            int collisionIndex = i < indices.length ? indices[i] : 0;
-            if (collisionIndex < 0 || collisionIndex >= unmappedCollisionList.size()) {
-                GeyserImpl.getInstance().getLogger().warning("Missing block shape mapping for Java block " + i + " at index " + collisionIndex + "; using empty shape.");
-                collisions.add(new BoundingBox[0]);
-                continue;
-            }
-            collisions.add(unmappedCollisionList.get(collisionIndex));
+            collisions.add(unmappedCollisionList.get(indices[i]));
         }
 
         collisions.trim();
