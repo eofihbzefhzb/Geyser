@@ -76,7 +76,6 @@ import static org.cloudburstmc.netty.channel.raknet.RakConstants.DEFAULT_PACKET_
 
 public final class GeyserServer {
     private static final boolean PRINT_DEBUG_PINGS = Boolean.parseBoolean(System.getProperty("Geyser.PrintPingsInDebugMode", "true"));
-    private static final boolean PROXY_BRIDGE_DEBUG = Boolean.parseBoolean(System.getProperty("Geyser.ProxyBridgeDebug", "false"));
 
     /*
     The following constants are all used to ensure the ping does not reach a length where it is unparsable by the Bedrock client
@@ -99,6 +98,12 @@ public final class GeyserServer {
     private static final int SHUTDOWN_TIMEOUT_MS = 500;
 
     private final GeyserImpl geyser;
+
+    /** Same switch as the rest of the bridge tracing: one config option turns the whole join on. */
+    private boolean bridgeDebugEnabled() {
+        return this.geyser.config().advanced().bedrock().portalBridge().debugLogging();
+    }
+
     private EventLoopGroup group;
     // Split childGroup may improve IO
     private EventLoopGroup childGroup;
@@ -236,7 +241,7 @@ public final class GeyserServer {
     }
 
     public boolean onConnectionRequest(InetSocketAddress inetSocketAddress, InetSocketAddress clientAddress) {
-        if (PROXY_BRIDGE_DEBUG) {
+        if (bridgeDebugEnabled()) {
             geyser.getLogger().info("[proxy-bridge] RakNet connection request from " + inetSocketAddress);
         }
         List<String> allowedProxyIPs = geyser.config().advanced().bedrock().haproxyProtocolWhitelistedIps();
@@ -264,7 +269,7 @@ public final class GeyserServer {
         geyser.eventBus().fire(requestEvent);
         if (requestEvent.isCancelled()) {
             geyser.getLogger().debug("Connection request from " + ip + " was cancelled using the API!");
-            if (PROXY_BRIDGE_DEBUG) {
+            if (bridgeDebugEnabled()) {
                 geyser.getLogger().info("[proxy-bridge] Connection request cancelled for " + inetSocketAddress);
             }
             connectionAttempts++;
@@ -272,7 +277,7 @@ public final class GeyserServer {
         }
 
         geyser.getLogger().debug(GeyserLocale.getLocaleStringLog("geyser.network.attempt_connect", ip));
-        if (PROXY_BRIDGE_DEBUG) {
+        if (bridgeDebugEnabled()) {
             geyser.getLogger().info("[proxy-bridge] Connection request accepted for " + inetSocketAddress);
         }
         connectionAttempts++;

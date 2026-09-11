@@ -48,7 +48,7 @@ public final class PortalBridgeConfig {
 
     @Comment("""
         Whether to emit extra portal bridge startup logging.
-        Packet-level debug logging still uses the JVM property Geyser.ProxyBridgeDebug.""")
+        This single switch covers the whole join, packet-level tracing included.""")
     private boolean debugLogging;
 
     @Comment("""

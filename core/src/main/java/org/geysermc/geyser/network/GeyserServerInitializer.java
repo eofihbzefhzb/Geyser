@@ -39,8 +39,13 @@ import org.geysermc.geyser.session.GeyserSession;
 
 
 public class GeyserServerInitializer extends BedrockServerInitializer {
-    private static final boolean PROXY_BRIDGE_DEBUG = Boolean.parseBoolean(System.getProperty("Geyser.ProxyBridgeDebug", "false"));
     private final GeyserImpl geyser;
+
+    /** Same switch as the rest of the bridge tracing: one config option turns the whole join on. */
+    private boolean bridgeDebugEnabled() {
+        return this.geyser.config().advanced().bedrock().portalBridge().debugLogging();
+    }
+
     private final boolean rakCookiesEnabled;
     // There is a constructor that doesn't require inputting threads, but older Netty versions don't have it
     @Getter
@@ -62,7 +67,7 @@ public class GeyserServerInitializer extends BedrockServerInitializer {
     @Override
     public void initSession(@NonNull BedrockServerSession bedrockServerSession) {
         try {
-            if (PROXY_BRIDGE_DEBUG) {
+            if (bridgeDebugEnabled()) {
                 this.geyser.getLogger().info("[proxy-bridge] initSession remote=" + bedrockServerSession.getSocketAddress());
             }
             bedrockServerSession.setLogging(this.geyser.config().debugMode());
@@ -77,7 +82,7 @@ public class GeyserServerInitializer extends BedrockServerInitializer {
             }
 
             bedrockServerSession.setPacketHandler(new UpstreamPacketHandler(this.geyser, session));
-            if (PROXY_BRIDGE_DEBUG) {
+            if (bridgeDebugEnabled()) {
                 this.geyser.getLogger().info("[proxy-bridge] packet handler installed remote=" + bedrockServerSession.getSocketAddress());
             }
         } catch (Throwable e) {

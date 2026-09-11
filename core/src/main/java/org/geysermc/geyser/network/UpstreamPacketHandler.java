@@ -86,7 +86,16 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.TimeUnit;
 
 public class UpstreamPacketHandler extends LoggingPacketHandler {
-    private static final boolean PROXY_BRIDGE_DEBUG = Boolean.parseBoolean(System.getProperty("Geyser.ProxyBridgeDebug", "false"));
+    /**
+     * Whether to trace the early join stages, before the session is known to be a bridge ingress.
+     * <p>
+     * These used to sit behind a JVM system property while the later stages used the config flag,
+     * so turning debug-logging on gave four of the ten traces and no hint that the rest existed.
+     * Both now read the same config option: one switch, the whole join.
+     */
+    private boolean bridgeDebugEnabled() {
+        return geyser.config().advanced().bedrock().portalBridge().debugLogging();
+    }
 
     /**
      * A join crosses several stages, but only the last one is news in production: the rest are
@@ -162,7 +171,7 @@ public class UpstreamPacketHandler extends LoggingPacketHandler {
 
     @Override
     public void onDisconnect(CharSequence reason) {
-        if (PROXY_BRIDGE_DEBUG) {
+        if (bridgeDebugEnabled()) {
             geyser.getLogger().info("[proxy-bridge] upstream disconnect remote=" + session.getUpstream().getAddress() + " reason=" + reason);
         }
         // Use our own disconnect messages for these reasons
@@ -176,7 +185,7 @@ public class UpstreamPacketHandler extends LoggingPacketHandler {
 
     @Override
     public PacketSignal handle(RequestNetworkSettingsPacket packet) {
-        if (PROXY_BRIDGE_DEBUG) {
+        if (bridgeDebugEnabled()) {
             geyser.getLogger().info("[proxy-bridge] request_network_settings remote=" + session.getUpstream().getAddress() + " protocol=" + packet.getProtocolVersion());
         }
         if (!setCorrectCodec(packet.getProtocolVersion())) {
@@ -196,7 +205,7 @@ public class UpstreamPacketHandler extends LoggingPacketHandler {
 
     @Override
     public PacketSignal handle(LoginPacket loginPacket) {
-        if (PROXY_BRIDGE_DEBUG) {
+        if (bridgeDebugEnabled()) {
             geyser.getLogger().info("[proxy-bridge] login packet remote=" + session.getUpstream().getAddress()
                     + " protocol=" + loginPacket.getProtocolVersion()
                     + " authType=" + (loginPacket.getAuthPayload() != null ? loginPacket.getAuthPayload().getAuthType() : "null")
@@ -225,14 +234,14 @@ public class UpstreamPacketHandler extends LoggingPacketHandler {
             geyser.getLogger().info("[proxy-bridge] Bedrock authentication completed; Floodgate handoff ready for "
                 + session.bedrockUsername());
         }
-        if (PROXY_BRIDGE_DEBUG) {
+        if (bridgeDebugEnabled()) {
             geyser.getLogger().info("[proxy-bridge] login encryption complete remote=" + session.getUpstream().getAddress()
                     + " xuid=" + session.xuid() + " username=" + session.bedrockUsername());
         }
 
         if (session.isClosed()) {
             // Can happen if Xbox validation fails
-            if (PROXY_BRIDGE_DEBUG) {
+            if (bridgeDebugEnabled()) {
                 geyser.getLogger().info("[proxy-bridge] session closed during login remote=" + session.getUpstream().getAddress());
             }
             session.forciblyCloseUpstream();
@@ -256,7 +265,7 @@ public class UpstreamPacketHandler extends LoggingPacketHandler {
         PlayStatusPacket playStatus = new PlayStatusPacket();
         playStatus.setStatus(PlayStatusPacket.Status.LOGIN_SUCCESS);
         session.sendUpstreamPacket(playStatus);
-        if (PROXY_BRIDGE_DEBUG) {
+        if (bridgeDebugEnabled()) {
             geyser.getLogger().info("[proxy-bridge] login success sent remote=" + session.getUpstream().getAddress()
                     + " username=" + session.bedrockUsername());
         }
