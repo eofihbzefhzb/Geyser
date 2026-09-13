@@ -38,9 +38,10 @@ Geyser generates/persists the active ID and writes an atomic
 the ID before publishing a session.
 
 Use `external-hosted: true` and an empty `external-network-id` in the
-MCXboxBroadcast config. Startup order does not matter: Geyser waits for the cache
-file and retries its bind until the token is usable, and the publisher waits
-for `portal-session-status.json`, so manual NetherNet ID copying is unnecessary.
+MCXboxBroadcast config. Start Velocity/Geyser first, or within the publisher's
+`discovery-timeout-seconds` (120 by default): the publisher waits that long for
+`portal-session-status.json`, and Geyser retries its bind until the token is usable,
+so manual NetherNet ID copying is unnecessary.
 
 For requirements, the full publisher configuration and session visibility, see the companion
 [setup guide](https://github.com/eofihbzefhzb/Broadcaster#reliable-geyser--mcxboxbroadcast-setup).
