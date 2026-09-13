@@ -49,7 +49,7 @@ mockito = "5.+"
 # candidates instead of leaving every NetherNet channel on 0.0.0.0, plus native WebRTC crash
 # and leak fixes.
 # Served by JitPack from the matching release tag, so this value IS the tag name.
-nethernet = "1.7.4-ip.8"
+nethernet = "1.7.4-ip.9"
 webrtc = "1.0.3"
 
 # plugin versions
