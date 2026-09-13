@@ -68,11 +68,18 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
     private final List<CIDRMatcher> trustedProxyMatchers;
     private final List<String> configuredRules;
     private final NetherNetEventLoops eventLoops = new NetherNetEventLoops();
+    /**
+     * Guards both executors together with {@link #closed}, so neither can be created after close()
+     * has shut them down. Separate from the instance monitor, which a start attempt holds while it
+     * waits for the auth cache.
+     */
+    private final Object executorLock = new Object();
     private @Nullable ScheduledExecutorService statusWriterExecutor;
     private @Nullable ScheduledExecutorService startupRetryExecutor;
     private volatile @Nullable PortalNetherNetServer netherNetServer;
     private volatile long lastSignalingRebindAttempt;
     private volatile String authHeaderFingerprint = "";
+    private volatile boolean closed;
 
     public PortalBridgeBootstrap(GeyserImpl geyser) {
         this.geyser = geyser;
@@ -130,18 +137,27 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
     // reloads a server that is already running - there was nothing left to reload after a
     // failed startup. Retry on a timer instead of giving up after one try.
     private void attemptStart(int attempt) {
+        if (this.closed) {
+            return;
+        }
         try {
             startNetherNetServer();
             startStatusWriter();
-            if (this.startupRetryExecutor != null) {
-                this.startupRetryExecutor.shutdownNow();
-                this.startupRetryExecutor = null;
+            synchronized (this.executorLock) {
+                if (this.startupRetryExecutor != null) {
+                    this.startupRetryExecutor.shutdownNow();
+                    this.startupRetryExecutor = null;
+                }
             }
-            if (attempt > 1) {
+            if (attempt > 1 && !this.closed) {
                 geyser.getLogger().info("[proxy-bridge] NetherNet ingress started successfully after " + attempt + " attempts.");
             }
         } catch (Throwable throwable) {
             closeNetherNetServersOnly();
+            if (this.closed) {
+                // Geyser shut down while this attempt ran: nothing is left to retry for.
+                return;
+            }
             long delay = retryDelaySeconds(attempt);
             // Log the reason once, then stay quiet. Passing the throwable here printed a
             // full stacktrace on every attempt, and the retry loop never stops, which buries
@@ -175,14 +191,19 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
     }
 
     private void scheduleStartupRetry(int nextAttempt, long delaySeconds) {
-        if (this.startupRetryExecutor == null) {
-            this.startupRetryExecutor = Executors.newSingleThreadScheduledExecutor(runnable -> {
-                Thread thread = new Thread(runnable, "GeyserPortalBridgeStartupRetry");
-                thread.setDaemon(true);
-                return thread;
-            });
+        synchronized (this.executorLock) {
+            if (this.closed) {
+                return;
+            }
+            if (this.startupRetryExecutor == null) {
+                this.startupRetryExecutor = Executors.newSingleThreadScheduledExecutor(runnable -> {
+                    Thread thread = new Thread(runnable, "GeyserPortalBridgeStartupRetry");
+                    thread.setDaemon(true);
+                    return thread;
+                });
+            }
+            this.startupRetryExecutor.schedule(() -> attemptStart(nextAttempt), delaySeconds, TimeUnit.SECONDS);
         }
-        this.startupRetryExecutor.schedule(() -> attemptStart(nextAttempt), delaySeconds, TimeUnit.SECONDS);
     }
 
     public boolean isTrustedProxy(@Nullable InetSocketAddress address) {
@@ -205,13 +226,18 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
 
     @Override
     public void close() {
-        if (this.startupRetryExecutor != null) {
-            this.startupRetryExecutor.shutdownNow();
-            this.startupRetryExecutor = null;
-        }
-        if (this.statusWriterExecutor != null) {
-            this.statusWriterExecutor.shutdownNow();
-            this.statusWriterExecutor = null;
+        synchronized (this.executorLock) {
+            this.closed = true;
+            // shutdownNow() also interrupts a retry that is waiting for the auth cache, so
+            // closeNetherNetServersOnly() below does not sit out that minute for the instance monitor.
+            if (this.startupRetryExecutor != null) {
+                this.startupRetryExecutor.shutdownNow();
+                this.startupRetryExecutor = null;
+            }
+            if (this.statusWriterExecutor != null) {
+                this.statusWriterExecutor.shutdownNow();
+                this.statusWriterExecutor = null;
+            }
         }
         deleteStatusFile();
         closeNetherNetServersOnly();
@@ -231,15 +257,20 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
     }
 
     private void startStatusWriter() {
-        this.statusWriterExecutor = Executors.newSingleThreadScheduledExecutor(runnable -> {
-            Thread thread = new Thread(runnable, "GeyserPortalStatusWriter");
-            thread.setDaemon(true);
-            return thread;
-        });
-        writeStatusFile();
-        this.statusWriterExecutor.scheduleWithFixedDelay(this::writeStatusFile, 5, 5, TimeUnit.SECONDS);
-        this.statusWriterExecutor.scheduleWithFixedDelay(this::reloadSignalingIfAuthChanged, 2, 2, TimeUnit.SECONDS);
-        this.statusWriterExecutor.scheduleWithFixedDelay(this::rebindSignalingIfDisconnected, 15, 15, TimeUnit.SECONDS);
+        synchronized (this.executorLock) {
+            if (this.closed) {
+                return;
+            }
+            this.statusWriterExecutor = Executors.newSingleThreadScheduledExecutor(runnable -> {
+                Thread thread = new Thread(runnable, "GeyserPortalStatusWriter");
+                thread.setDaemon(true);
+                return thread;
+            });
+            this.statusWriterExecutor.execute(this::writeStatusFile);
+            this.statusWriterExecutor.scheduleWithFixedDelay(this::writeStatusFile, 5, 5, TimeUnit.SECONDS);
+            this.statusWriterExecutor.scheduleWithFixedDelay(this::reloadSignalingIfAuthChanged, 2, 2, TimeUnit.SECONDS);
+            this.statusWriterExecutor.scheduleWithFixedDelay(this::rebindSignalingIfDisconnected, 15, 15, TimeUnit.SECONDS);
+        }
     }
 
     /**
@@ -410,6 +441,10 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
      * previous run. Sub-accounts join the primary session as members, so one ingress serves them all.
      */
     private synchronized void startNetherNetServer() {
+        if (this.closed) {
+            throw new IllegalStateException("The portal bridge is shut down");
+        }
+
         String configuredNetworkId = this.config.netherNetNetworkId();
         if (configuredNetworkId.isBlank()) {
             configuredNetworkId = readPersistedNetworkId();
@@ -417,9 +452,16 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
 
         PortalNetherNetServer server = new PortalNetherNetServer(
             this.geyser, this.config, this.eventLoops, this.config.xboxAuthHeaderFile(), configuredNetworkId);
-        // Let the failure propagate: with one ingress there is nothing left to serve if it fails,
-        // so attemptStart() logs it once and schedules the retry.
-        server.start();
+        try {
+            server.start();
+        } catch (Throwable throwable) {
+            // Not yet the active server, so closeNetherNetServersOnly() cannot reach it. The transport
+            // leaves a supplied PeerConnectionFactory to its owner, so without this every failed
+            // attempt would keep a native factory and its threads alive. The failure still propagates
+            // so attemptStart() logs it once and schedules the retry.
+            server.close();
+            throw throwable;
+        }
         this.netherNetServer = server;
         this.authHeaderFingerprint = computeCombinedFingerprint();
         writeIdentityFile();

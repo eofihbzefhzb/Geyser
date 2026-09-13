@@ -50,7 +50,7 @@ import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.List;
-import java.util.Set;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
@@ -65,8 +65,11 @@ public final class PortalNetherNetServer implements AutoCloseable {
     /** Peers accepted on the current signaling generation. Swapped on every reload. */
     private volatile ChannelGroup activeChildren =
         new DefaultChannelGroup("nethernet-peers", GlobalEventExecutor.INSTANCE);
-    /** Factories retired by a reload, awaiting a safe moment to free their native handle. */
-    private final Set<PeerConnectionFactory> retiredFactories = ConcurrentHashMap.newKeySet();
+    /**
+     * Factories retired by a reload, each with the peers still running on it, awaiting a safe moment
+     * to free its native handle.
+     */
+    private final Map<PeerConnectionFactory, ChannelGroup> retiredFactories = new ConcurrentHashMap<>();
     private final NetherNetEventLoops eventLoops;
     private final GeyserNetherNetServerInitializer initializer;
     private PeerConnectionFactory peerConnectionFactory;
@@ -339,14 +342,22 @@ public final class PortalNetherNetServer implements AutoCloseable {
             this.channel = null;
         }
         this.signaling.close();
-        // The event loop groups are owned and shut down by PortalBridgeBootstrap.
-        // On shutdown the peers are going away with the process, so disposing inline is fine;
-        // drain anything the reaper is still holding so nothing is left allocated.
-        disposeQuietly(this.peerConnectionFactory);
-        for (PeerConnectionFactory pending : this.retiredFactories) {
-            disposeQuietly(pending);
+        // The event loop groups are owned and shut down by PortalBridgeBootstrap. Every factory is
+        // freed here, retired ones included, but only once its peers are closed: shutdown does not
+        // wait for sessions to finish disconnecting, and freeing a factory under a live
+        // PeerConnection is a native use-after-free.
+        closePeersAndDispose(this.activeChildren, this.peerConnectionFactory);
+        for (PeerConnectionFactory pending : this.retiredFactories.keySet()) {
+            ChannelGroup children = this.retiredFactories.remove(pending);
+            if (children != null) {
+                closePeersAndDispose(children, pending);
+            }
         }
-        this.retiredFactories.clear();
+    }
+
+    private static void closePeersAndDispose(ChannelGroup children, PeerConnectionFactory factory) {
+        children.close().awaitUninterruptibly(5, TimeUnit.SECONDS);
+        disposeQuietly(factory);
     }
 
     /**
@@ -367,13 +378,13 @@ public final class PortalNetherNetServer implements AutoCloseable {
         if (factory == null) {
             return;
         }
-        this.retiredFactories.add(factory);
+        this.retiredFactories.put(factory, children);
         scheduleDisposalAttempt(factory, children, 1);
     }
 
     private void scheduleDisposalAttempt(PeerConnectionFactory factory, ChannelGroup children, int attempt) {
         this.eventLoops.workerGroup().schedule(() -> {
-            if (!this.retiredFactories.contains(factory)) {
+            if (!this.retiredFactories.containsKey(factory)) {
                 return;
             }
             // Watch THIS factory's own peers, not the server's session count. An earlier version
@@ -381,8 +392,10 @@ public final class PortalNetherNetServer implements AutoCloseable {
             // true - so it always fell through to the attempt cap and freed the factory while its
             // peers were still live, which is the very thing the delay exists to prevent.
             if (children.isEmpty()) {
-                this.retiredFactories.remove(factory);
-                disposeQuietly(factory);
+                // Only whoever removes the entry frees it, so this and close() never both dispose it.
+                if (this.retiredFactories.remove(factory) != null) {
+                    disposeQuietly(factory);
+                }
                 return;
             }
             // Reported once rather than every pass, and never acted on: the players keep playing
