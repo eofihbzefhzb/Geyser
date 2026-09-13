@@ -274,8 +274,8 @@ public class UpstreamPacketHandler extends LoggingPacketHandler {
         resourcePacksInfo.getResourcePackInfos().addAll(this.resourcePackLoadEvent.infoPacketEntries());
         resourcePacksInfo.setVibrantVisualsForceDisabled(!session.isAllowVibrantVisuals());
 
-        resourcePacksInfo.setForcedToAccept(GeyserImpl.getInstance().config().gameplay().forceResourcePacks() ||
-            resourcePackLoadEvent.isIntegratedPackActive());
+        // The integrated pack is offered, not forced: a player who declines it still joins
+        resourcePacksInfo.setForcedToAccept(GeyserImpl.getInstance().config().gameplay().forceResourcePacks());
         resourcePacksInfo.setWorldTemplateId(new UUID(0, 0));
         resourcePacksInfo.setWorldTemplateVersion("");
 

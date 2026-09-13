@@ -326,7 +326,7 @@ public interface GeyserConfig {
 
         @Comment("""
             Whether to automatically serve a resource pack that is required for some Geyser features to all connecting Bedrock players.
-            If enabled, force-resource-packs will be enabled.""")
+            Players may decline it unless force-resource-packs is enabled.""")
         @DefaultBoolean(true)
         boolean enableIntegratedPack();
 
