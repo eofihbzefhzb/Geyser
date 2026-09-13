@@ -18,8 +18,8 @@ session.
 
 ### Minimal paired configuration
 
-Install this fork as `Geyser-Velocity.jar` in Velocity's `plugins` folder. In `config.yml`, set the portal bridge under
-`advanced.bedrock.portal-bridge`:
+Install this fork as `Geyser-Velocity.jar` in Velocity's `plugins` folder. In
+`config.yml`, set the portal bridge under `advanced.bedrock.portal-bridge`:
 
 ```yaml
 advanced:
@@ -34,8 +34,8 @@ advanced:
 The auth-file must be the MCXboxBroadcast cache on the same trusted machine.
 It is read without logging the token. Leave `nether-net-network-id` empty;
 Geyser generates/persists the active ID and writes an atomic
-`portal-session-status.json`. MCXboxBroadcast discovers that file and verifies
-the ID before publishing a session.
+`portal-session-status.json`. MCXboxBroadcast discovers that file and checks
+that it is ready and recent before publishing a session.
 
 Use `external-hosted: true` and an empty `external-network-id` in the
 MCXboxBroadcast config. Start Velocity/Geyser first, or within the publisher's
@@ -43,8 +43,8 @@ MCXboxBroadcast config. Start Velocity/Geyser first, or within the publisher's
 `portal-session-status.json`, and Geyser retries its bind until the token is usable,
 so manual NetherNet ID copying is unnecessary.
 
-For requirements, the full publisher configuration and session visibility, see the companion
-[setup guide](https://github.com/eofihbzefhzb/Broadcaster#reliable-geyser--mcxboxbroadcast-setup).
+For requirements, the full publisher configuration and session visibility, see
+the companion [setup guide](https://github.com/eofihbzefhzb/Broadcaster#reliable-geyser--mcxboxbroadcast-setup).
 
 The tested companion artifact is available from the
 [NetherNet ingress release](https://github.com/eofihbzefhzb/Geyser/releases/latest).

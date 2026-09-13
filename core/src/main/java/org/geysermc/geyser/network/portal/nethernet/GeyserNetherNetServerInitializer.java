@@ -28,16 +28,15 @@ package org.geysermc.geyser.network.portal.nethernet;
 import io.netty.channel.Channel;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.group.ChannelGroup;
-
-import java.util.function.Supplier;
 import org.checkerframework.checker.nullness.qual.NonNull;
 import org.cloudburstmc.protocol.bedrock.BedrockPeer;
 import org.cloudburstmc.protocol.bedrock.BedrockServerSession;
-
 import org.geysermc.geyser.GeyserImpl;
 import org.geysermc.geyser.network.InvalidPacketHandler;
 import org.geysermc.geyser.network.UpstreamPacketHandler;
 import org.geysermc.geyser.session.GeyserSession;
+
+import java.util.function.Supplier;
 
 public final class GeyserNetherNetServerInitializer extends NetherNetBedrockChannelInitializer<BedrockServerSession> {
     private final GeyserImpl geyser;

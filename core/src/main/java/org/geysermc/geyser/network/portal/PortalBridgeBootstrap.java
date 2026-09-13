@@ -57,20 +57,21 @@ import java.util.concurrent.TimeUnit;
  */
 public final class PortalBridgeBootstrap implements AutoCloseable {
     private static final String SESSION_STATUS_FILENAME = "portal-session-status.json";
-    /** Geyser's own record of the ids to reuse on restart, so the Xbox identity stays stable. */
+    /** Geyser's own record of the network id to reuse on restart, so the Xbox identity stays stable. */
     private static final String IDENTITIES_FILENAME = "portal-nethernet-identities.json";
+    private static final long STARTUP_RETRY_DELAY_SECONDS = 10;
+    /** Minimum gap between two attempts to rebind a dropped signaling websocket. */
+    private static final long SIGNALING_REBIND_COOLDOWN_MS = 30_000;
+
     private final GeyserImpl geyser;
     private final PortalBridgeConfig config;
     private final List<CIDRMatcher> trustedProxyMatchers;
     private final List<String> configuredRules;
+    private final NetherNetEventLoops eventLoops = new NetherNetEventLoops();
     private @Nullable ScheduledExecutorService statusWriterExecutor;
     private @Nullable ScheduledExecutorService startupRetryExecutor;
-    private static final long STARTUP_RETRY_DELAY_SECONDS = 10;
-    /** Minimum gap between two attempts to rebind a dropped signaling websocket. */
-    private static final long SIGNALING_REBIND_COOLDOWN_MS = 30_000;
+    private volatile @Nullable PortalNetherNetServer netherNetServer;
     private volatile long lastSignalingRebindAttempt;
-    private @Nullable PortalNetherNetServer netherNetServer;
-    private final NetherNetEventLoops eventLoops = new NetherNetEventLoops();
     private volatile String authHeaderFingerprint = "";
 
     public PortalBridgeBootstrap(GeyserImpl geyser) {
@@ -147,7 +148,7 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
             // every other line in the log.
             if (attempt == 1) {
                 geyser.getLogger().error("[proxy-bridge] NetherNet ingress could not start: " + rootMessage(throwable)
-                    + " Retrying in the background; no further attempts will be logged until one succeeds.");
+                    + " Retrying in the background; a reminder is logged every 30 attempts until one succeeds.");
             } else if (attempt % 30 == 0) {
                 geyser.getLogger().warning("[proxy-bridge] NetherNet ingress still down after " + attempt
                     + " attempts: " + rootMessage(throwable));
@@ -506,9 +507,7 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
                 matchers.add(new CIDRMatcher(trimmed));
             } catch (RuntimeException exception) {
                 geyser.getLogger().warning("[proxy-bridge] Ignoring invalid trusted proxy rule: " + trimmed);
-                if (geyser.config().debugMode() || config.debugLogging()) {
-                    geyser.getLogger().debug("[proxy-bridge] Invalid trusted proxy rule parse failure", exception);
-                }
+                geyser.getLogger().debug("[proxy-bridge] Invalid trusted proxy rule parse failure", exception);
             }
         }
         return List.copyOf(matchers);

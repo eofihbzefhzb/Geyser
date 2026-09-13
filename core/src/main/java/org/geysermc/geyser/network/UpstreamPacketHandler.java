@@ -226,14 +226,6 @@ public class UpstreamPacketHandler extends LoggingPacketHandler {
         receivedLoginPacket = true;
 
         LoginEncryptionUtils.encryptPlayerConnection(session, loginPacket);
-        if (bridgeTraceEnabled()) {
-            geyser.getLogger().info("[proxy-bridge] Bedrock authentication completed; Floodgate handoff ready for "
-                + session.bedrockUsername());
-        }
-        if (bridgeDebugEnabled()) {
-            geyser.getLogger().info("[proxy-bridge] login encryption complete remote=" + session.getUpstream().getAddress()
-                    + " xuid=" + session.xuid() + " username=" + session.bedrockUsername());
-        }
 
         if (session.isClosed()) {
             // Can happen if Xbox validation fails
@@ -242,6 +234,10 @@ public class UpstreamPacketHandler extends LoggingPacketHandler {
             }
             session.forciblyCloseUpstream();
             return PacketSignal.HANDLED;
+        }
+        if (bridgeDebugEnabled()) {
+            geyser.getLogger().info("[proxy-bridge] Bedrock authentication completed for " + session.bedrockUsername()
+                + " (xuid=" + session.xuid() + ", remote=" + session.getUpstream().getAddress() + ")");
         }
 
         if (geyser.getSessionManager().isXuidAlreadyPending(session.xuid()) || geyser.getSessionManager().sessionByXuid(session.xuid()) != null) {

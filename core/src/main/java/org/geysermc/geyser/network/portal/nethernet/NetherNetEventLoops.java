@@ -35,8 +35,8 @@ import io.netty.util.concurrent.DefaultThreadFactory;
  * <p>
  * Owned by {@link org.geysermc.geyser.network.portal.PortalBridgeBootstrap} rather than by the
  * server itself, so a signaling reload swaps the channel without churning threads: the two
- * groups created with 0 threads default to {@code availableProcessors() * 2} each, which is a lot to tear
- * down and rebuild every time an Xbox token refreshes.
+ * groups created with 0 threads default to {@code availableProcessors() * 2} each, which is a
+ * lot to tear down and rebuild every time an Xbox token refreshes.
  */
 public final class NetherNetEventLoops implements AutoCloseable {
     private final EventLoopGroup bossGroup =

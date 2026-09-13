@@ -55,12 +55,13 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 public final class PortalNetherNetServer implements AutoCloseable {
-    private final GeyserImpl geyser;
-    private final PortalBridgeConfig config;
-    private final String authHeaderFile;
     private static final long DISPOSAL_CHECK_SECONDS = 30;
     /** Attempts after which a still-pinned factory is reported once, so a long wait is visible. */
     private static final int DISPOSAL_REPORT_ATTEMPTS = 20; // ~10 minutes
+
+    private final GeyserImpl geyser;
+    private final PortalBridgeConfig config;
+    private final String authHeaderFile;
     /** Peers accepted on the current signaling generation. Swapped on every reload. */
     private volatile ChannelGroup activeChildren =
         new DefaultChannelGroup("nethernet-peers", GlobalEventExecutor.INSTANCE);
@@ -210,13 +211,6 @@ public final class PortalNetherNetServer implements AutoCloseable {
         // Name the account in both the success and failure paths: a bare "401 Unauthorized"
         // from the bind below gives no indication of which token Xbox rejected.
         String authLabel = authLabel();
-        // Log it BEFORE binding. Wrapping the failure afterwards is unreliable here:
-        // Netty rethrows the original exception instance from the event-loop thread, so the
-        // logged stack trace can hide which auth source was in flight. A plain "attempting"
-        // line means the last one printed before an error is always the one that failed.
-        // Only under debug-logging: the success line below already names the auth source, and
-        // the failure path names it too, so on a retry loop this was an extra INFO line every
-        // pass for no new information.
         if (config.debugLogging()) {
             this.geyser.getLogger().info("[proxy-bridge] Binding NetherNet ingress for auth source " + authLabel
                 + " (network id " + this.signaling.getLocalNetworkId() + ", token " + shortAuthFingerprint() + ")");
@@ -276,12 +270,9 @@ public final class PortalNetherNetServer implements AutoCloseable {
             ? new TracingServerSignaling(this.geyser, rawSignaling)
             : rawSignaling;
 
-        // Use a dedicated PeerConnectionFactory for the new channel instead of the
-        // currently-live instance. If the bind below fails, Netty/the native layer
-        // tears down the failed channel and, with it, whatever PeerConnectionFactory
-        // it was constructed with. Handing it the still-in-use factory would take
-        // down every already-connected/-connecting peer along with the failed
-        // reload attempt.
+        // A fresh PeerConnectionFactory per signaling generation. The current one stays with the
+        // peers already running on it and is freed by the reaper once they are gone; see
+        // scheduleDisposal().
         PeerConnectionFactory newPeerConnectionFactory = new PeerConnectionFactory();
 
         ServerBootstrap bootstrap = new ServerBootstrap()
@@ -348,7 +339,7 @@ public final class PortalNetherNetServer implements AutoCloseable {
             this.channel = null;
         }
         this.signaling.close();
-        // The event loop groups are owned and shut down by the bootstrap.
+        // The event loop groups are owned and shut down by PortalBridgeBootstrap.
         // On shutdown the peers are going away with the process, so disposing inline is fine;
         // drain anything the reaper is still holding so nothing is left allocated.
         disposeQuietly(this.peerConnectionFactory);
