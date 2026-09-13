@@ -213,7 +213,6 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
             this.statusWriterExecutor = null;
         }
         deleteStatusFile();
-        deleteShardFiles();
         closeNetherNetServersOnly();
         this.eventLoops.close();
     }
@@ -406,12 +405,8 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
     }
 
     /**
-     * Starts the single NetherNet ingress.
-     * <p>
-     * This used to loop over {@code shard-count} / {@code xbox-auth-header-files} and bind one
-     * ingress per Xbox account. That existed so each sub-account could advertise its own joinable
-     * session; sub-accounts now join the primary session as members instead, so there is exactly
-     * one session and therefore exactly one ingress to bind.
+     * Starts the NetherNet ingress, on the configured network id or else the one persisted by the
+     * previous run. Sub-accounts join the primary session as members, so one ingress serves them all.
      */
     private synchronized void startNetherNetServer() {
         String configuredNetworkId = this.config.netherNetNetworkId();
@@ -450,25 +445,7 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
     }
 
     /**
-     * Removes stale files from older builds that wrote a plain-text id and a separate shard
-     * list. The identities file is deliberately kept: it is what lets a restart reuse the same
-     * Xbox identity instead of publishing a new one.
-     */
-    private void deleteShardFiles() {
-        for (String stale : new String[] {"portal-nethernet-id.txt", "portal-nethernet-shards.json"}) {
-            try {
-                Files.deleteIfExists(this.geyser.configDirectory().resolve(stale));
-            } catch (Exception exception) {
-                if (config.debugLogging()) {
-                    geyser.getLogger().warning("[proxy-bridge] Failed to remove stale file " + stale + ": " + exception.getMessage());
-                }
-            }
-        }
-    }
-
-    /**
-     * Reads the previously bound network id. Also accepts the old {@code shards} array so an
-     * existing identities file from a sharded build still yields a stable identity on first start.
+     * Reads the network id persisted by {@link #writeIdentityFile()}, or an empty string.
      */
     private String readPersistedNetworkId() {
         Path identitiesPath = this.geyser.configDirectory().resolve(IDENTITIES_FILENAME);
@@ -480,15 +457,6 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
             JsonObject root = JsonParser.parseString(Files.readString(identitiesPath)).getAsJsonObject();
             if (root.has("networkId") && !root.get("networkId").isJsonNull()) {
                 return root.get("networkId").getAsString().replaceAll("[^0-9]", "");
-            }
-            if (root.has("shards") && root.get("shards").isJsonArray()) {
-                var shards = root.getAsJsonArray("shards");
-                if (!shards.isEmpty() && shards.get(0).isJsonObject()) {
-                    JsonObject first = shards.get(0).getAsJsonObject();
-                    if (first.has("networkId") && !first.get("networkId").isJsonNull()) {
-                        return first.get("networkId").getAsString().replaceAll("[^0-9]", "");
-                    }
-                }
             }
         } catch (Exception exception) {
             if (config.debugLogging()) {
