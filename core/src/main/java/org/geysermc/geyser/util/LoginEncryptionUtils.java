@@ -167,15 +167,11 @@ public class LoginEncryptionUtils {
             return false;
         }
 
-        // Sessions that came in through Geyser's own NetherNet portal ingress were
-        // already authenticated against Xbox Live during signaling before Geyser
-        // ever saw them, so trust those directly. Do NOT trust "the address looks
-        // like loopback" on its own: a NetherNet WebRTC channel and any ordinary
-        // process on this machine hitting the plain Bedrock UDP port can both
-        // report a loopback address, so that check alone would let any local
-        // process impersonate a player without going through Xbox at all.
+        // Never for NetherNet ingress. Xbox signaling authenticates the websocket, not the identity
+        // inside the login packet, so trusting it would let any NetherNet peer pick its own gamertag
+        // and xuid. Real clients send an Xbox-signed chain there and pass validate-bedrock-login.
         if (session.isProxyBridgeIngress()) {
-            return true;
+            return false;
         }
 
         InetSocketAddress address = session.getUpstream().getAddress();
@@ -183,9 +179,8 @@ public class LoginEncryptionUtils {
             return false;
         }
 
-        // trusted-proxy-ips in config.yml is the single source of truth. A second,
-        // separate list used to be read from the Geyser.ProxyBridgeTrustedIps system
-        // property, which silently competed with the config for the same decision.
+        // Only a relay listed in trusted-proxy-ips (e.g. MCXboxBroadcast's NetherNet bridge, which
+        // verifies the Xbox signature itself before re-signing) may send SELF_SIGNED logins.
         PortalBridgeBootstrap portalBridgeBootstrap = session.getGeyser().getPortalBridgeBootstrap();
         return portalBridgeBootstrap != null && portalBridgeBootstrap.isTrustedProxy(address);
     }

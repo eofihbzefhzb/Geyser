@@ -286,6 +286,7 @@ public class GeyserSession implements GeyserConnection, GeyserCommandSource {
     private List<String> certChainData;
     @Setter
     private String token;
+    /** True when a trusted-proxy-ips relay logged this player in with a SELF_SIGNED login. */
     @Setter
     private boolean trustedProxySelfSignedLogin;
 
