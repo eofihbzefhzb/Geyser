@@ -1,3 +1,28 @@
+/*
+ * Copyright (c) 2026 GeyserMC. http://geysermc.org
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ *
+ * @author GeyserMC
+ * @link https://github.com/GeyserMC/Geyser
+ */
+
 package org.geysermc.geyser.network.portal.nethernet;
 
 import com.google.gson.JsonObject;
@@ -16,13 +41,18 @@ import io.netty.util.concurrent.GlobalEventExecutor;
 import org.geysermc.geyser.GeyserImpl;
 import org.geysermc.geyser.configuration.PortalBridgeConfig;
 
+import java.net.ConnectException;
 import java.net.InetSocketAddress;
-import java.util.concurrent.TimeUnit;
+import java.net.SocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 
 public final class PortalNetherNetServer implements AutoCloseable {
     private final GeyserImpl geyser;
@@ -35,8 +65,7 @@ public final class PortalNetherNetServer implements AutoCloseable {
     private volatile ChannelGroup activeChildren =
         new DefaultChannelGroup("nethernet-peers", GlobalEventExecutor.INSTANCE);
     /** Factories retired by a reload, awaiting a safe moment to free their native handle. */
-    private final java.util.Set<PeerConnectionFactory> retiredFactories =
-        java.util.concurrent.ConcurrentHashMap.newKeySet();
+    private final Set<PeerConnectionFactory> retiredFactories = ConcurrentHashMap.newKeySet();
     private final NetherNetEventLoops eventLoops;
     private final GeyserNetherNetServerInitializer initializer;
     private PeerConnectionFactory peerConnectionFactory;
@@ -60,7 +89,7 @@ public final class PortalNetherNetServer implements AutoCloseable {
     }
 
     private static NetherNetXboxRpcSignaling createSignaling(GeyserImpl geyser, PortalBridgeConfig config, String authHeaderFile, String configuredNetworkId) {
-        String authHeader = resolveAuthHeader(geyser, config, authHeaderFile);
+        String authHeader = resolveAuthHeader(geyser, config, authHeaderFile, true);
         if (!configuredNetworkId.isBlank()) {
             return new NetherNetXboxRpcSignaling(configuredNetworkId, authHeader);
         }
@@ -69,7 +98,9 @@ public final class PortalNetherNetServer implements AutoCloseable {
 
     // authHeaderFile is the MCXboxBroadcast cache holding the Xbox token this ingress
     // authenticates with. It falls back to config.xboxAuthHeaderFile() when empty.
-    private static String resolveAuthHeader(GeyserImpl geyser, PortalBridgeConfig config, String authHeaderFile) {
+    // waitForCache is only for binding: the 2-second auth watcher polls this too, and waiting a
+    // minute there would stall the status file and signaling watchdog that share its thread.
+    private static String resolveAuthHeader(GeyserImpl geyser, PortalBridgeConfig config, String authHeaderFile, boolean waitForCache) {
         if (!config.xboxAuthHeader().isBlank()) {
             return config.xboxAuthHeader();
         }
@@ -86,7 +117,7 @@ public final class PortalNetherNetServer implements AutoCloseable {
         // the very first read, and report exactly which of those is the case so a
         // permanent failure (as opposed to a startup race) is diagnosable from the log
         // instead of a bare "no valid header" message.
-        int maxRetries = 30;
+        int maxRetries = waitForCache ? 30 : 1;
         String lastFailureReason = "unknown";
         for (int attempt = 1; attempt <= maxRetries; attempt++) {
             try {
@@ -138,8 +169,10 @@ public final class PortalNetherNetServer implements AutoCloseable {
             }
         }
 
-        geyser.getLogger().warning("[proxy-bridge] Failed to read a valid Xbox auth header from " + targetFile
-            + " after 60 seconds. Last reason: " + lastFailureReason);
+        if (waitForCache) {
+            geyser.getLogger().warning("[proxy-bridge] Failed to read a valid Xbox auth header from " + targetFile
+                + " after 60 seconds. Last reason: " + lastFailureReason);
+        }
         return "";
     }
 
@@ -148,7 +181,7 @@ public final class PortalNetherNetServer implements AutoCloseable {
      * intentionally the only value exposed to the reload watcher.
      */
     public static String authHeaderFingerprint(GeyserImpl geyser, PortalBridgeConfig config, String authHeaderFile) {
-        String authHeader = resolveAuthHeader(geyser, config, authHeaderFile);
+        String authHeader = resolveAuthHeader(geyser, config, authHeaderFile, false);
         if (authHeader.isBlank()) {
             return "";
         }
@@ -176,7 +209,7 @@ public final class PortalNetherNetServer implements AutoCloseable {
 
         // Name the account in both the success and failure paths: a bare "401 Unauthorized"
         // from the bind below gives no indication of which token Xbox rejected.
-        String authLabel = this.authHeaderFile.isBlank() ? "<config header>" : this.authHeaderFile;
+        String authLabel = authLabel();
         // Log it BEFORE binding. Wrapping the failure afterwards is unreliable here:
         // Netty rethrows the original exception instance from the event-loop thread, so the
         // logged stack trace can hide which auth source was in flight. A plain "attempting"
@@ -205,6 +238,10 @@ public final class PortalNetherNetServer implements AutoCloseable {
         }
     }
 
+    private String authLabel() {
+        return this.authHeaderFile.isBlank() ? "<config header>" : this.authHeaderFile;
+    }
+
     /**
      * Short, non-secret tag for the token in use, so an unexpected account shows up in the log.
      */
@@ -219,9 +256,8 @@ public final class PortalNetherNetServer implements AutoCloseable {
     /**
      * Recreates only the signaling channel used to accept new NetherNet
      * connections, using a fresh Xbox auth header. The shared event loop
-     * groups and every already-established player channel are left untouched, so calling this does not disconnect anyone who
-     * is already connected. Use this instead of {@link #close()} +
-     * re-construction whenever only the auth header has changed.
+     * groups and every already-established player channel are left untouched,
+     * so calling this does not disconnect anyone who is already connected.
      */
     public synchronized void reloadSignaling() {
         Channel oldChannel = this.channel;
@@ -289,7 +325,7 @@ public final class PortalNetherNetServer implements AutoCloseable {
         // instead, which disposes it once no session is left on it.
         scheduleDisposal(oldPeerConnectionFactory, retiredChildren);
 
-        this.geyser.getLogger().info("[proxy-bridge] NetherNet signaling reloaded for " + this.authHeaderFile + ", new network ID " + this.signaling.getLocalNetworkId());
+        this.geyser.getLogger().info("[proxy-bridge] NetherNet signaling reloaded for " + authLabel() + ", network ID " + this.signaling.getLocalNetworkId());
     }
 
     private static void disposeQuietly(PeerConnectionFactory factory) {
@@ -390,7 +426,6 @@ public final class PortalNetherNetServer implements AutoCloseable {
         return this.signaling.isActive();
     }
 
-
     /**
      * Adds stage-only diagnostics around the library signaling callbacks. Signal
      * bodies are deliberately never logged because they contain SDP/candidates.
@@ -405,7 +440,7 @@ public final class PortalNetherNetServer implements AutoCloseable {
         }
 
         @Override
-        public void bind(java.net.SocketAddress address) throws java.net.ConnectException {
+        public void bind(SocketAddress address) throws ConnectException {
             delegate.bind(address);
             geyser.getLogger().info("[proxy-bridge] NetherNet signaling websocket connected.");
         }
@@ -425,7 +460,7 @@ public final class PortalNetherNetServer implements AutoCloseable {
         }
 
         @Override
-        public java.util.List<NetherNetSignaling.IceServerInfo> getIceServers() {
+        public List<NetherNetSignaling.IceServerInfo> getIceServers() {
             return delegate.getIceServers();
         }
 

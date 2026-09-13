@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019-2025 GeyserMC. http://geysermc.org
+ * Copyright (c) 2026 GeyserMC. http://geysermc.org
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -40,9 +40,11 @@ import org.geysermc.geyser.translator.text.MessageTranslator;
 import java.net.ConnectException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
-import java.nio.file.StandardCopyOption;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -80,16 +82,14 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
 
     public void start() {
         geyser.getLogger().info("[proxy-bridge] Portal bridge enabled.");
-        
+
         if (trustedProxyMatchers.isEmpty() && config.debugLogging()) {
             geyser.getLogger().info("[proxy-bridge] No trusted proxy rules are configured. "
                 + "This only matters if you relay a plain Bedrock proxy into this Geyser's normal UDP listener; "
-                + "NetherNet ingress trust does not depend on this list.");
+                + "NetherNet ingress never uses this list.");
         }
 
-        // Only worth stating when there is something to state; the empty case is already
-        // covered by the message above, which printed "…rules are configured" immediately
-        // followed by "Trusted proxy rules: 0".
+        // The empty case is already covered by the message above.
         if (config.debugLogging() && !configuredRules.isEmpty()) {
             geyser.getLogger().info("[proxy-bridge] Trusted proxy rules: " + configuredRules.size());
         }
@@ -107,8 +107,7 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
      * Mutes dev.kastle's own signaling logger.
      * <p>
      * That library logs the full websocket handshake stacktrace itself on every failed bind, so a
-     * rejected token produced two stacktraces per retry. The standalone bootstrap silences
-     * it through log4j2.xml, but this fork runs on Velocity, which uses its own logging config, so
+     * rejected token produced two stacktraces per retry. Velocity uses its own logging config, so
      * the level has to be set programmatically here. Done reflectively and best-effort: if Log4j core
      * is not reachable the bridge still works, the log is just noisier.
      */
@@ -143,7 +142,7 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
         } catch (Throwable throwable) {
             closeNetherNetServersOnly();
             long delay = retryDelaySeconds(attempt);
-            // Log the reason once, then stay quiet. Passing the throwable here printed a full
+            // Log the reason once, then stay quiet. Passing the throwable here printed a
             // full stacktrace on every attempt, and the retry loop never stops, which buries
             // every other line in the log.
             if (attempt == 1) {
@@ -156,7 +155,6 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
             scheduleStartupRetry(attempt + 1, delay);
         }
     }
-
 
     /** Back off 10s -> 30s -> 60s so a permanently rejected token stops hammering Xbox and the log. */
     private static long retryDelaySeconds(int attempt) {
@@ -203,7 +201,6 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
         }
         return false;
     }
-
 
     @Override
     public void close() {
@@ -310,20 +307,22 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
                     return;
                 }
 
-                // Reload only when this ingress' own token actually changed.
+                // Recorded before reloading: a token Xbox rejects would otherwise be retried every 2
+                // seconds, each attempt opening a websocket. On failure the current signaling keeps
+                // serving, and rebindSignalingIfDisconnected() retries on its own cooldown if it drops.
+                this.authHeaderFingerprint = confirmedFingerprint;
                 if (this.netherNetServer != null) {
                     geyser.getLogger().info("[proxy-bridge] Xbox auth source changed; reloading NetherNet signaling.");
                     this.netherNetServer.reloadSignaling();
                     writeIdentityFile();
                     writeStatusFile();
                 }
-                this.authHeaderFingerprint = confirmedFingerprint;
             }
         } catch (Throwable throwable) {
             ConnectException authFailure = findAuthConnectException(throwable);
             if (authFailure != null) {
                 geyser.getLogger().error("[proxy-bridge] Failed to reload NetherNet signaling: "
-                    + authFailure.getMessage() + " (will keep retrying every 2s until the Xbox auth source is valid)");
+                    + authFailure.getMessage() + " (the current signaling keeps serving until the token changes again or it drops)");
             } else {
                 geyser.getLogger().error("[proxy-bridge] Failed to reload NetherNet signaling after Xbox auth refresh.", throwable);
             }
@@ -371,7 +370,7 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
             root.addProperty("players", players);
             root.addProperty("maxPlayers", maxPlayers);
             root.addProperty("ready", this.netherNetServer != null);
-            root.addProperty("generatedAt", java.time.Instant.now().toString());
+            root.addProperty("generatedAt", Instant.now().toString());
             if (this.netherNetServer != null) {
                 root.addProperty("netherNetId", this.netherNetServer.networkId());
             }
@@ -382,7 +381,7 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
             Files.writeString(temporaryPath, root.toString() + System.lineSeparator());
             try {
                 Files.move(temporaryPath, path, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-            } catch (java.nio.file.AtomicMoveNotSupportedException exception) {
+            } catch (AtomicMoveNotSupportedException exception) {
                 Files.move(temporaryPath, path, StandardCopyOption.REPLACE_EXISTING);
             }
         } catch (Exception exception) {
@@ -515,7 +514,6 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
             return null;
         }
     }
-
 
     private static List<String> copyRules(@Nullable List<String> configuredRules) {
         if (configuredRules == null || configuredRules.isEmpty()) {
