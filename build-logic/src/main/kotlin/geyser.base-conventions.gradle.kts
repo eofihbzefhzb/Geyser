@@ -31,9 +31,9 @@ repositories {
     mavenCentral()
 
     // Builds github.com/eofihbzefhzb/NetworkCompatible on demand from its release tag.
-    // Used instead of Maven Central for netty-transport-nethernet: the fork resolves the
-    // NetherNet peer address from ICE candidates, and publishing to Central would need the
-    // dev.kastle namespace. Restricted to that one group so nothing else resolves here.
+    // Used instead of Maven Central for netty-transport-nethernet: the fork carries the fixes
+    // this NetherNet ingress relies on (peer address from ICE candidates, native WebRTC crash
+    // and leak fixes), and publishing to Central would need the dev.kastle namespace. Restricted to that one group so nothing else resolves here.
     maven("https://jitpack.io") {
         content {
             includeGroup("com.github.eofihbzefhzb.NetworkCompatible")

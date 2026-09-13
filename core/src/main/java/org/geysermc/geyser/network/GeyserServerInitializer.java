@@ -37,15 +37,8 @@ import org.cloudburstmc.protocol.bedrock.netty.initializer.BedrockServerInitiali
 import org.geysermc.geyser.GeyserImpl;
 import org.geysermc.geyser.session.GeyserSession;
 
-
 public class GeyserServerInitializer extends BedrockServerInitializer {
     private final GeyserImpl geyser;
-
-    /** Same switch as the rest of the bridge tracing: one config option turns the whole join on. */
-    private boolean bridgeDebugEnabled() {
-        return this.geyser.config().advanced().bedrock().portalBridge().debugLogging();
-    }
-
     private final boolean rakCookiesEnabled;
     // There is a constructor that doesn't require inputting threads, but older Netty versions don't have it
     @Getter
@@ -54,6 +47,11 @@ public class GeyserServerInitializer extends BedrockServerInitializer {
     public GeyserServerInitializer(GeyserImpl geyser, boolean rakCookiesEnabled) {
         this.geyser = geyser;
         this.rakCookiesEnabled = rakCookiesEnabled;
+    }
+
+    /** Same switch as the rest of the bridge tracing: one config option turns the whole join on. */
+    private boolean bridgeDebugEnabled() {
+        return this.geyser.config().advanced().bedrock().portalBridge().debugLogging();
     }
 
     @Override

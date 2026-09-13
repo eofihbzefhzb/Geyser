@@ -172,15 +172,6 @@ public class GeyserSessionAdapter extends SessionAdapter {
         MinecraftLocale.downloadAndLoadLocale(locale);
     }
 
-    /** Component#toString() dumps the whole style/children tree; only the text is useful in a log. */
-    private static String plainReason(net.kyori.adventure.text.Component reason) {
-        try {
-            return net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer.plainText().serialize(reason);
-        } catch (Throwable ignored) {
-            return reason.toString();
-        }
-    }
-
     @Override
     public void disconnected(DisconnectedEvent event) {
         session.loggingIn = false;
@@ -191,7 +182,7 @@ public class GeyserSessionAdapter extends SessionAdapter {
             // full - as warnings, because the backend closes those before the player spawns.
             // A server-sent disconnect message has no Throwable; only a genuine transport
             // failure does, and that is the only case worth raising the level for.
-            String reason = event.getReason() == null ? "unspecified" : plainReason(event.getReason());
+            String reason = event.getReason() == null ? "unspecified" : MessageTranslator.convertToPlainText(event.getReason(), locale);
             if (event.getCause() == null) {
                 // Normal disconnect. Geyser already logs one INFO line for it just below, so this
                 // stays on debug to avoid printing the same event twice.

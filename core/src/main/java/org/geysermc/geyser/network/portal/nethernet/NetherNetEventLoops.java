@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019-2025 GeyserMC. http://geysermc.org
+ * Copyright (c) 2026 GeyserMC. http://geysermc.org
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -35,7 +35,7 @@ import io.netty.util.concurrent.DefaultThreadFactory;
  * <p>
  * Owned by {@link org.geysermc.geyser.network.portal.PortalBridgeBootstrap} rather than by the
  * server itself, so a signaling reload swaps the channel without churning threads: the two
- * unbounded groups default to {@code availableProcessors() * 2} each, which is a lot to tear
+ * groups created with 0 threads default to {@code availableProcessors() * 2} each, which is a lot to tear
  * down and rebuild every time an Xbox token refreshes.
  */
 public final class NetherNetEventLoops implements AutoCloseable {

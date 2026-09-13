@@ -86,6 +86,26 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.TimeUnit;
 
 public class UpstreamPacketHandler extends LoggingPacketHandler {
+
+    private boolean networkSettingsRequested = false;
+    private boolean receivedLoginPacket = false;
+    private boolean finishedResourcePackSending = false;
+    private final Deque<String> packsToSend = new ArrayDeque<>();
+    private final CompressionStrategy compressionStrategy;
+    // Avoid overloading consoles when downloading larger resource packs
+    private static final int PACKET_SEND_DELAY = 4 * 50;
+    private final Queue<ResourcePackChunkRequestPacket> chunkRequestQueue = new ConcurrentLinkedQueue<>();
+    private boolean currentlySendingChunks = false;
+    private SessionLoadResourcePacksEventImpl resourcePackLoadEvent;
+
+    public UpstreamPacketHandler(GeyserImpl geyser, GeyserSession session) {
+        super(geyser, session);
+
+        ZlibCompression compression = new ZlibCompression(Zlib.RAW);
+        compression.setLevel(this.geyser.config().advanced().bedrock().compressionLevel());
+        this.compressionStrategy = new SimpleCompressionStrategy(compression);
+    }
+
     /**
      * Whether to trace the early join stages, before the session is known to be a bridge ingress.
      * <p>
@@ -105,25 +125,6 @@ public class UpstreamPacketHandler extends LoggingPacketHandler {
     private boolean bridgeTraceEnabled() {
         return session.isProxyBridgeIngress()
             && geyser.config().advanced().bedrock().portalBridge().debugLogging();
-    }
-
-    private boolean networkSettingsRequested = false;
-    private boolean receivedLoginPacket = false;
-    private boolean finishedResourcePackSending = false;
-    private final Deque<String> packsToSend = new ArrayDeque<>();
-    private final CompressionStrategy compressionStrategy;
-    // Avoid overloading consoles when downloading larger resource packs
-    private static final int PACKET_SEND_DELAY = 4 * 50;
-    private final Queue<ResourcePackChunkRequestPacket> chunkRequestQueue = new ConcurrentLinkedQueue<>();
-    private boolean currentlySendingChunks = false;
-    private SessionLoadResourcePacksEventImpl resourcePackLoadEvent;
-
-    public UpstreamPacketHandler(GeyserImpl geyser, GeyserSession session) {
-        super(geyser, session);
-
-        ZlibCompression compression = new ZlibCompression(Zlib.RAW);
-        compression.setLevel(this.geyser.config().advanced().bedrock().compressionLevel());
-        this.compressionStrategy = new SimpleCompressionStrategy(compression);
     }
 
     private PacketSignal translateAndDefault(BedrockPacket packet) {

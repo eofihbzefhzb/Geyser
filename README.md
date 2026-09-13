@@ -18,8 +18,7 @@ session.
 
 ### Minimal paired configuration
 
-Install this fork as `Geyser-Velocity.jar` alongside Floodgate and ViaVersion on
-Velocity. In `config.yml`, set the portal bridge under
+Install this fork as `Geyser-Velocity.jar` in Velocity's `plugins` folder. In `config.yml`, set the portal bridge under
 `advanced.bedrock.portal-bridge`:
 
 ```yaml
@@ -39,12 +38,11 @@ Geyser generates/persists the active ID and writes an atomic
 the ID before publishing a session.
 
 Use `external-hosted: true` and an empty `external-network-id` in the
-MCXboxBroadcast config. Start Velocity/Geyser before the publisher, or use the
-paired local launcher. The publisher waits for Geyser readiness, so manual
-NetherNet ID copying is unnecessary.
+MCXboxBroadcast config. Startup order does not matter: Geyser waits for the cache
+file and retries its bind until the token is usable, and the publisher waits
+for `portal-session-status.json`, so manual NetherNet ID copying is unnecessary.
 
-For complete directory layout, friend-safety defaults, joining instructions,
-and stage-by-stage troubleshooting, see the companion
+For requirements, the full publisher configuration and session visibility, see the companion
 [setup guide](https://github.com/eofihbzefhzb/Broadcaster#reliable-geyser--mcxboxbroadcast-setup).
 
 The tested companion artifact is available from the

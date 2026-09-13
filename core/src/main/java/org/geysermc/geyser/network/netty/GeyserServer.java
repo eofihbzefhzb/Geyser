@@ -98,12 +98,6 @@ public final class GeyserServer {
     private static final int SHUTDOWN_TIMEOUT_MS = 500;
 
     private final GeyserImpl geyser;
-
-    /** Same switch as the rest of the bridge tracing: one config option turns the whole join on. */
-    private boolean bridgeDebugEnabled() {
-        return this.geyser.config().advanced().bedrock().portalBridge().debugLogging();
-    }
-
     private EventLoopGroup group;
     // Split childGroup may improve IO
     private EventLoopGroup childGroup;
@@ -138,6 +132,11 @@ public final class GeyserServer {
         }
 
         this.broadcastPort = geyser.config().advanced().bedrock().broadcastPort();
+    }
+
+    /** Same switch as the rest of the bridge tracing: one config option turns the whole join on. */
+    private boolean bridgeDebugEnabled() {
+        return this.geyser.config().advanced().bedrock().portalBridge().debugLogging();
     }
 
     public CompletableFuture<Void> bind(InetSocketAddress address) {

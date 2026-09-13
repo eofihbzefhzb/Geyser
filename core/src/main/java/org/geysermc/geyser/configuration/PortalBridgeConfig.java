@@ -41,29 +41,30 @@ public final class PortalBridgeConfig {
 
     @Comment("""
         A list of trusted proxy IP addresses or CIDR ranges that are allowed to send SELF_SIGNED Bedrock logins
-        into Geyser for portal bridge sessions.
+        to Geyser's normal Bedrock listener, e.g. MCXboxBroadcast's NetherNet bridge. NetherNet ingress never uses it.
         Keep this empty unless you control the ingress adapter and have blocked direct public access to this
         Geyser instance.""")
     private List<String> trustedProxyIps = new ArrayList<>();
 
     @Comment("""
-        Whether to emit extra portal bridge startup logging.
-        This single switch covers the whole join, packet-level tracing included.""")
+        Whether to emit extra portal bridge logging.
+        This single switch covers startup, signaling and every stage of a join.""")
     private boolean debugLogging;
 
     @Comment("""
         Optional explicit NetherNet network id to bind to.
-        Leave empty to let the signaling layer choose one, or set it when you need the bridge to keep a stable Xbox/NetherNet identity across restarts.""")
+        Leave empty to reuse the id saved in portal-nethernet-identities.json; a new one is generated on first start.""")
     private String netherNetNetworkId = "";
 
     @Comment("""
         Xbox/NetherNet authorization header for the server-side signaling session.
-        This is currently required to terminate NetherNet sessions directly inside Geyser until Xbox session management is migrated here too.""")
+        Either this or xbox-auth-header-file is required for NetherNet ingress to start.""")
     private String xboxAuthHeader = "";
 
     @Comment("""
         Optional path to an MCXboxBroadcast cache.json file.
-        If xbox-auth-header is empty, Geyser will read minecraftSession.authorizationHeader from this file at startup.""")
+        If xbox-auth-header is empty, Geyser reads minecraftSession.authorizationHeader from this file at startup,
+        then checks it every 2 seconds and reloads signaling when the token changes.""")
     private String xboxAuthHeaderFile = "";
 
     public boolean enabled() {
