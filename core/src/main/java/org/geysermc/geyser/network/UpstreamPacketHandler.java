@@ -107,20 +107,15 @@ public class UpstreamPacketHandler extends LoggingPacketHandler {
     }
 
     /**
-     * Whether to trace the early join stages, before the session is known to be a bridge ingress.
-     * <p>
-     * These used to sit behind a JVM system property while the later stages used the config flag,
-     * so turning debug-logging on gave four of the ten traces and no hint that the rest existed.
-     * Both now read the same config option: one switch, the whole join.
+     * Join traces for every Bedrock session, RakNet included, while portal-bridge debug-logging is on.
      */
     private boolean bridgeDebugEnabled() {
         return geyser.config().advanced().bedrock().portalBridge().debugLogging();
     }
 
     /**
-     * A join crosses several stages, but only the last one is news in production: the rest are
-     * either implied by it or, on failure, reported by the failure itself. Gating the intermediate
-     * ones keeps a busy server from writing five lines per player for a join that simply worked.
+     * The same switch, limited to sessions that came in over NetherNet ingress. Off by default: in
+     * production the single "joined over NetherNet" line from GeyserSessionAdapter is enough.
      */
     private boolean bridgeTraceEnabled() {
         return session.isProxyBridgeIngress()

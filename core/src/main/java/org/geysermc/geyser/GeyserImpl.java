@@ -612,6 +612,8 @@ public class GeyserImpl implements GeyserApi, EventRegistrar {
         runIfNonNull(scoreboardUpdater, ScoreboardUpdater::shutdown);
         runIfNonNull(geyserServer, GeyserServer::shutdown);
         runIfNonNull(portalBridgeBootstrap, PortalBridgeBootstrap::close);
+        // Cleared so a reload that disables the bridge does not keep trusting the old trusted-proxy-ips.
+        portalBridgeBootstrap = null;
         runIfNonNull(skinUploader, FloodgateSkinUploader::close);
         runIfNonNull(newsHandler, NewsHandler::shutdown);
         runIfNonNull(erosionUnixListener, UnixSocketClientListener::close);
