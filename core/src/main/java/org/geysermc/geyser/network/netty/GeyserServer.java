@@ -134,11 +134,6 @@ public final class GeyserServer {
         this.broadcastPort = geyser.config().advanced().bedrock().broadcastPort();
     }
 
-    /** Same switch as the rest of the bridge tracing: one config option turns the whole join on. */
-    private boolean bridgeDebugEnabled() {
-        return this.geyser.config().advanced().bedrock().portalBridge().debugLogging();
-    }
-
     public CompletableFuture<Void> bind(InetSocketAddress address) {
         bootstrapFutures = new ChannelFuture[listenCount];
         for (int i = 0; i < listenCount; i++) {
@@ -240,9 +235,6 @@ public final class GeyserServer {
     }
 
     public boolean onConnectionRequest(InetSocketAddress inetSocketAddress, InetSocketAddress clientAddress) {
-        if (bridgeDebugEnabled()) {
-            geyser.getLogger().info("[proxy-bridge] RakNet connection request from " + inetSocketAddress);
-        }
         List<String> allowedProxyIPs = geyser.config().advanced().bedrock().haproxyProtocolWhitelistedIps();
         if (geyser.config().advanced().bedrock().useHaproxyProtocol() && !allowedProxyIPs.isEmpty()) {
             boolean isWhitelistedIP = false;
@@ -268,17 +260,11 @@ public final class GeyserServer {
         geyser.eventBus().fire(requestEvent);
         if (requestEvent.isCancelled()) {
             geyser.getLogger().debug("Connection request from " + ip + " was cancelled using the API!");
-            if (bridgeDebugEnabled()) {
-                geyser.getLogger().info("[proxy-bridge] Connection request cancelled for " + inetSocketAddress);
-            }
             connectionAttempts++;
             return false;
         }
 
         geyser.getLogger().debug(GeyserLocale.getLocaleStringLog("geyser.network.attempt_connect", ip));
-        if (bridgeDebugEnabled()) {
-            geyser.getLogger().info("[proxy-bridge] Connection request accepted for " + inetSocketAddress);
-        }
         connectionAttempts++;
         return true;
     }

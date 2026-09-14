@@ -49,11 +49,6 @@ public class GeyserServerInitializer extends BedrockServerInitializer {
         this.rakCookiesEnabled = rakCookiesEnabled;
     }
 
-    /** Same switch as the rest of the bridge tracing: one config option turns the whole join on. */
-    private boolean bridgeDebugEnabled() {
-        return this.geyser.config().advanced().bedrock().portalBridge().debugLogging();
-    }
-
     @Override
     protected void preInitChannel(Channel channel) throws Exception {
         if (!rakCookiesEnabled) {
@@ -65,9 +60,6 @@ public class GeyserServerInitializer extends BedrockServerInitializer {
     @Override
     public void initSession(@NonNull BedrockServerSession bedrockServerSession) {
         try {
-            if (bridgeDebugEnabled()) {
-                this.geyser.getLogger().info("[proxy-bridge] initSession remote=" + bedrockServerSession.getSocketAddress());
-            }
             bedrockServerSession.setLogging(this.geyser.config().debugMode());
             GeyserSession session = new GeyserSession(this.geyser, bedrockServerSession, this.eventLoopGroup.next());
 
@@ -80,9 +72,6 @@ public class GeyserServerInitializer extends BedrockServerInitializer {
             }
 
             bedrockServerSession.setPacketHandler(new UpstreamPacketHandler(this.geyser, session));
-            if (bridgeDebugEnabled()) {
-                this.geyser.getLogger().info("[proxy-bridge] packet handler installed remote=" + bedrockServerSession.getSocketAddress());
-            }
         } catch (Throwable e) {
             // Error must be caught or it will be swallowed
             this.geyser.getLogger().error("Error occurred while initializing player!", e);

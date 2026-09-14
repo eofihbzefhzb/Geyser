@@ -30,7 +30,6 @@ import com.google.gson.JsonParser;
 import org.checkerframework.checker.nullness.qual.Nullable;
 import org.geysermc.geyser.GeyserImpl;
 import org.geysermc.geyser.configuration.PortalBridgeConfig;
-import org.geysermc.geyser.network.CIDRMatcher;
 import org.geysermc.geyser.network.portal.nethernet.NetherNetEventLoops;
 import org.geysermc.geyser.network.portal.nethernet.PortalNetherNetServer;
 import org.geysermc.geyser.ping.GeyserPingInfo;
@@ -45,15 +44,13 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Startup and trust bootstrap for portal-style Bedrock ingress.
+ * Startup bootstrap for portal-style Bedrock ingress.
  */
 public final class PortalBridgeBootstrap implements AutoCloseable {
     private static final String SESSION_STATUS_FILENAME = "portal-session-status.json";
@@ -65,8 +62,6 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
 
     private final GeyserImpl geyser;
     private final PortalBridgeConfig config;
-    private final List<CIDRMatcher> trustedProxyMatchers;
-    private final List<String> configuredRules;
     private final NetherNetEventLoops eventLoops = new NetherNetEventLoops();
     /**
      * Guards both executors together with {@link #closed}, so neither can be created after close()
@@ -84,23 +79,10 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
     public PortalBridgeBootstrap(GeyserImpl geyser) {
         this.geyser = geyser;
         this.config = geyser.config().advanced().bedrock().portalBridge();
-        this.configuredRules = copyRules(this.config.trustedProxyIps());
-        this.trustedProxyMatchers = parseTrustedProxyMatchers(this.configuredRules);
     }
 
     public void start() {
         geyser.getLogger().info("[proxy-bridge] Portal bridge enabled.");
-
-        if (trustedProxyMatchers.isEmpty() && config.debugLogging()) {
-            geyser.getLogger().info("[proxy-bridge] No trusted proxy rules are configured. "
-                + "This only matters if you relay a plain Bedrock proxy into this Geyser's normal UDP listener; "
-                + "NetherNet ingress never uses this list.");
-        }
-
-        // The empty case is already covered by the message above.
-        if (config.debugLogging() && !configuredRules.isEmpty()) {
-            geyser.getLogger().info("[proxy-bridge] Trusted proxy rules: " + configuredRules.size());
-        }
 
         if (config.xboxAuthHeader().isBlank() && config.xboxAuthHeaderFile().isBlank()) {
             geyser.getLogger().warning("[proxy-bridge] Xbox auth header source is not configured; NetherNet ingress will stay disabled.");
@@ -204,24 +186,6 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
             }
             this.startupRetryExecutor.schedule(() -> attemptStart(nextAttempt), delaySeconds, TimeUnit.SECONDS);
         }
-    }
-
-    public boolean isTrustedProxy(@Nullable InetSocketAddress address) {
-        if (address == null) {
-            return false;
-        }
-
-        InetAddress inetAddress = address.getAddress();
-        if (inetAddress == null) {
-            return false;
-        }
-
-        for (CIDRMatcher matcher : trustedProxyMatchers) {
-            if (matcher.matches(inetAddress)) {
-                return true;
-            }
-        }
-        return false;
     }
 
     @Override
@@ -524,34 +488,5 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
             }
             return null;
         }
-    }
-
-    private static List<String> copyRules(@Nullable List<String> configuredRules) {
-        if (configuredRules == null || configuredRules.isEmpty()) {
-            return List.of();
-        }
-        return List.copyOf(configuredRules);
-    }
-
-    private List<CIDRMatcher> parseTrustedProxyMatchers(List<String> rules) {
-        List<CIDRMatcher> matchers = new ArrayList<>(rules.size());
-        for (String entry : rules) {
-            if (entry == null) {
-                continue;
-            }
-
-            String trimmed = entry.trim();
-            if (trimmed.isEmpty()) {
-                continue;
-            }
-
-            try {
-                matchers.add(new CIDRMatcher(trimmed));
-            } catch (RuntimeException exception) {
-                geyser.getLogger().warning("[proxy-bridge] Ignoring invalid trusted proxy rule: " + trimmed);
-                geyser.getLogger().debug("[proxy-bridge] Invalid trusted proxy rule parse failure", exception);
-            }
-        }
-        return List.copyOf(matchers);
     }
 }

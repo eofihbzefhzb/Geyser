@@ -28,8 +28,6 @@ package org.geysermc.geyser.configuration;
 import org.spongepowered.configurate.objectmapping.ConfigSerializable;
 import org.spongepowered.configurate.objectmapping.meta.Comment;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Objects;
 
 @ConfigSerializable
@@ -38,13 +36,6 @@ public final class PortalBridgeConfig {
         Whether to enable the NetherNet portal ingress.
         The normal Bedrock UDP listener remains available for direct server connections.""")
     private boolean enabled;
-
-    @Comment("""
-        A list of trusted proxy IP addresses or CIDR ranges that are allowed to send SELF_SIGNED Bedrock logins
-        to Geyser's normal Bedrock listener, e.g. MCXboxBroadcast's NetherNet bridge. NetherNet ingress never uses it.
-        Keep this empty unless you control the ingress adapter and have blocked direct public access to this
-        Geyser instance.""")
-    private List<String> trustedProxyIps = new ArrayList<>();
 
     @Comment("""
         Whether to emit extra portal bridge logging.
@@ -69,10 +60,6 @@ public final class PortalBridgeConfig {
 
     public boolean enabled() {
         return enabled;
-    }
-
-    public List<String> trustedProxyIps() {
-        return Objects.requireNonNullElse(trustedProxyIps, List.<String>of());
     }
 
     public boolean debugLogging() {

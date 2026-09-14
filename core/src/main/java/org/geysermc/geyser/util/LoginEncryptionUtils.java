@@ -42,7 +42,6 @@ import org.geysermc.cumulus.response.result.FormResponseResult;
 import org.geysermc.cumulus.response.result.ValidFormResponseResult;
 import org.geysermc.geyser.GeyserImpl;
 import org.geysermc.geyser.network.CodecProcessor;
-import org.geysermc.geyser.network.portal.PortalBridgeBootstrap;
 import org.geysermc.geyser.session.GeyserSession;
 import org.geysermc.geyser.session.auth.AuthData;
 import org.geysermc.geyser.session.auth.BedrockClientData;
@@ -73,16 +72,11 @@ public class LoginEncryptionUtils {
             }
 
             ChainValidationResult result = EncryptionUtils.validatePayload(authPayload);
-            boolean trustedProxySelfSigned = isTrustedProxySelfSigned(session, authPayload);
-            session.setTrustedProxySelfSignedLogin(trustedProxySelfSigned);
 
             geyser.getLogger().debug("Is player data signed? %s", result.signed());
-            if (!result.signed() && session.getGeyser().config().advanced().bedrock().validateBedrockLogin() && !trustedProxySelfSigned) {
+            if (!result.signed() && session.getGeyser().config().advanced().bedrock().validateBedrockLogin()) {
                 session.disconnect(GeyserLocale.getLocaleStringLog("geyser.network.remote.invalid_xbox_account"));
                 return;
-            }
-            if (trustedProxySelfSigned) {
-                geyser.getLogger().info("[proxy-bridge] accepting trusted SELF_SIGNED login from " + session.getUpstream().getAddress());
             }
 
             // Should always be present, but hey, why not make it safe :D
@@ -160,29 +154,6 @@ public class LoginEncryptionUtils {
             geyser.getLogger().warning(GeyserLocale.getLocaleStringLog("geyser.network.encryption.line_2", "https://geysermc.org/supported_java"));
             HAS_SENT_ENCRYPTION_MESSAGE = true;
         }
-    }
-
-    private static boolean isTrustedProxySelfSigned(GeyserSession session, AuthPayload authPayload) {
-        if (authPayload.getAuthType() != AuthType.SELF_SIGNED) {
-            return false;
-        }
-
-        // Never for NetherNet ingress. Xbox signaling authenticates the websocket, not the identity
-        // inside the login packet, so trusting it would let any NetherNet peer pick its own gamertag
-        // and xuid. Real clients send an Xbox-signed chain there and pass validate-bedrock-login.
-        if (session.isProxyBridgeIngress()) {
-            return false;
-        }
-
-        InetSocketAddress address = session.getUpstream().getAddress();
-        if (address == null) {
-            return false;
-        }
-
-        // Only a relay listed in trusted-proxy-ips (e.g. MCXboxBroadcast's NetherNet bridge, which
-        // verifies the Xbox signature itself before re-signing) may send SELF_SIGNED logins.
-        PortalBridgeBootstrap portalBridgeBootstrap = session.getGeyser().getPortalBridgeBootstrap();
-        return portalBridgeBootstrap != null && portalBridgeBootstrap.isTrustedProxy(address);
     }
 
     public static void buildAndShowLoginWindow(GeyserSession session) {

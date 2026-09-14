@@ -107,15 +107,9 @@ public class UpstreamPacketHandler extends LoggingPacketHandler {
     }
 
     /**
-     * Join traces for every Bedrock session, RakNet included, while portal-bridge debug-logging is on.
-     */
-    private boolean bridgeDebugEnabled() {
-        return geyser.config().advanced().bedrock().portalBridge().debugLogging();
-    }
-
-    /**
-     * The same switch, limited to sessions that came in over NetherNet ingress. Off by default: in
-     * production the single "joined over NetherNet" line from GeyserSessionAdapter is enough.
+     * Join traces for sessions that came in over NetherNet ingress, while portal-bridge debug-logging
+     * is on. Off by default: in production the "joined over NetherNet" line from GeyserSessionAdapter,
+     * and the one onDisconnect() logs for a join that never got that far, are enough.
      */
     private boolean bridgeTraceEnabled() {
         return session.isProxyBridgeIngress()
@@ -167,21 +161,30 @@ public class UpstreamPacketHandler extends LoggingPacketHandler {
 
     @Override
     public void onDisconnect(CharSequence reason) {
-        if (bridgeDebugEnabled()) {
-            geyser.getLogger().info("[proxy-bridge] upstream disconnect remote=" + session.getUpstream().getAddress() + " reason=" + reason);
-        }
         // Use our own disconnect messages for these reasons
         if (BedrockDisconnectReasons.CLOSED.contentEquals(reason)) {
             this.session.getUpstream().getSession().setDisconnectReason(GeyserLocale.getLocaleStringLog("geyser.network.disconnect.closed_by_remote_peer"));
         } else if (BedrockDisconnectReasons.TIMEOUT.contentEquals(reason)) {
             this.session.getUpstream().getSession().setDisconnectReason(GeyserLocale.getLocaleStringLog("geyser.network.disconnect.timed_out"));
         }
+        if (session.isProxyBridgeIngress() && !session.isLoggedIn()) {
+            // A NetherNet player who never reached "joined over NetherNet". Logged without debug-logging,
+            // because Geyser's own line for it names only the address: this adds who it was and the
+            // last step reached. The step comes from this handler, since the session's own login flags
+            // are already reset by the time a refusal from the Java server gets here.
+            String stage = session.getAuthData() == null ? "before logging in"
+                : !finishedResourcePackSending ? "at the resource pack screen"
+                : "while connecting to the server";
+            String who = session.getAuthData() == null ? String.valueOf(session.getUpstream().getAddress()) : session.getAuthData().name();
+            geyser.getLogger().info("[proxy-bridge] " + who + " did not get in over NetherNet (" + stage + "): "
+                + this.session.getUpstream().getSession().getDisconnectReason());
+        }
         this.session.disconnect(this.session.getUpstream().getSession().getDisconnectReason().toString());
     }
 
     @Override
     public PacketSignal handle(RequestNetworkSettingsPacket packet) {
-        if (bridgeDebugEnabled()) {
+        if (bridgeTraceEnabled()) {
             geyser.getLogger().info("[proxy-bridge] request_network_settings remote=" + session.getUpstream().getAddress() + " protocol=" + packet.getProtocolVersion());
         }
         if (!setCorrectCodec(packet.getProtocolVersion())) {
@@ -201,7 +204,7 @@ public class UpstreamPacketHandler extends LoggingPacketHandler {
 
     @Override
     public PacketSignal handle(LoginPacket loginPacket) {
-        if (bridgeDebugEnabled()) {
+        if (bridgeTraceEnabled()) {
             geyser.getLogger().info("[proxy-bridge] login packet remote=" + session.getUpstream().getAddress()
                     + " protocol=" + loginPacket.getProtocolVersion()
                     + " authType=" + (loginPacket.getAuthPayload() != null ? loginPacket.getAuthPayload().getAuthType() : "null")
@@ -229,13 +232,13 @@ public class UpstreamPacketHandler extends LoggingPacketHandler {
 
         if (session.isClosed()) {
             // Can happen if Xbox validation fails
-            if (bridgeDebugEnabled()) {
+            if (bridgeTraceEnabled()) {
                 geyser.getLogger().info("[proxy-bridge] session closed during login remote=" + session.getUpstream().getAddress());
             }
             session.forciblyCloseUpstream();
             return PacketSignal.HANDLED;
         }
-        if (bridgeDebugEnabled()) {
+        if (bridgeTraceEnabled()) {
             geyser.getLogger().info("[proxy-bridge] Bedrock authentication completed for " + session.bedrockUsername()
                 + " (xuid=" + session.xuid() + ", remote=" + session.getUpstream().getAddress() + ")");
         }
@@ -257,7 +260,7 @@ public class UpstreamPacketHandler extends LoggingPacketHandler {
         PlayStatusPacket playStatus = new PlayStatusPacket();
         playStatus.setStatus(PlayStatusPacket.Status.LOGIN_SUCCESS);
         session.sendUpstreamPacket(playStatus);
-        if (bridgeDebugEnabled()) {
+        if (bridgeTraceEnabled()) {
             geyser.getLogger().info("[proxy-bridge] login success sent remote=" + session.getUpstream().getAddress()
                     + " username=" + session.bedrockUsername());
         }
