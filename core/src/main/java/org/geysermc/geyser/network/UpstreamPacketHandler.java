@@ -167,11 +167,12 @@ public class UpstreamPacketHandler extends LoggingPacketHandler {
         } else if (BedrockDisconnectReasons.TIMEOUT.contentEquals(reason)) {
             this.session.getUpstream().getSession().setDisconnectReason(GeyserLocale.getLocaleStringLog("geyser.network.disconnect.timed_out"));
         }
-        if (session.isProxyBridgeIngress() && !session.isLoggedIn()) {
-            // A NetherNet player who never reached "joined over NetherNet". Logged without debug-logging,
-            // because Geyser's own line for it names only the address: this adds who it was and the
-            // last step reached. The step comes from this handler, since the session's own login flags
-            // are already reset by the time a refusal from the Java server gets here.
+        if (session.isProxyBridgeIngress() && !session.isProxyBridgeJoined()) {
+            // A NetherNet player who never reached "joined over NetherNet". Logged without debug-logging:
+            // Geyser's own line for a disconnect before login names only the address, and none of its
+            // lines say how far the join got. The session's login flags cannot tell either -
+            // GeyserSession#disconnect clears them before a disconnect it starts gets here, for players
+            // who were in game too - hence proxyBridgeJoined and this handler's own pack state.
             String stage = session.getAuthData() == null ? "before logging in"
                 : !finishedResourcePackSending ? "at the resource pack screen"
                 : "while connecting to the server";

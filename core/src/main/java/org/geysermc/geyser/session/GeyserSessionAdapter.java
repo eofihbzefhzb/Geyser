@@ -128,6 +128,7 @@ public class GeyserSessionAdapter extends SessionAdapter {
         session.loggedIn = true;
 
         if (session.isProxyBridgeIngress()) {
+            session.setProxyBridgeJoined(true);
             // The single production line for a NetherNet join, and the only place the resolved
             // peer address is stated: Geyser's own connect message just below reports the
             // backend, not where the Bedrock player came from.

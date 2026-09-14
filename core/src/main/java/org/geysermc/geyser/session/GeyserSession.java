@@ -290,6 +290,10 @@ public class GeyserSession implements GeyserConnection, GeyserCommandSource {
     @Setter
     private boolean proxyBridgeIngress;
 
+    /** True once a NetherNet ingress player has joined the Java server; stays true after disconnect. */
+    @Setter
+    private boolean proxyBridgeJoined;
+
     @NonNull
     @Setter
     private volatile AbstractGeyserboundPacketHandler erosionHandler;
