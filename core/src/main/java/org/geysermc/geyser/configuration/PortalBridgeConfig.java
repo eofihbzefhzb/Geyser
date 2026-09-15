@@ -34,7 +34,7 @@ import java.util.Objects;
 public final class PortalBridgeConfig {
     @Comment("""
         Whether to enable the NetherNet portal ingress.
-        The normal Bedrock UDP listener remains available for direct server connections.""")
+        Direct server connections keep going through Geyser's own Bedrock listener, set by bedrock.transport.""")
     private boolean enabled;
 
     @Comment("""
