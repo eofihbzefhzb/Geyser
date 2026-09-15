@@ -8,23 +8,54 @@ Geyser is a bridge between Minecraft: Bedrock Edition and Minecraft: Java Editio
 
 Geyser is an [Open Collaboration](https://opencollaboration.dev/) project.
 
-## MCXboxBroadcast NetherNet ingress
+## NetherNet Portal Bridge Fork
 
-This fork includes a portal-style NetherNet ingress designed to pair with the
-[MCXboxBroadcast standalone publisher](https://github.com/eofihbzefhzb/Broadcaster).
-Geyser owns the Bedrock/NetherNet gameplay connection; MCXboxBroadcast only
-publishes the Xbox session. Do not run a second Bedrock relay for the same
-session.
+This fork adds the **portal bridge**: a NetherNet ingress that lets Bedrock players join from the
+Xbox friends list. It pairs with the [Broadcaster fork](https://github.com/eofihbzefhzb/Broadcaster),
+which publishes the Xbox session those players see. This fork builds only `Geyser-Velocity.jar`.
 
-This ingress is separate from Geyser's own NetherNet support (`bedrock.transport` and
-`bedrock.signaling`), which lets players join by server address through built-in or external
-signaling. This one uses Xbox signaling, so players join from the friends list of an account in
-the published Xbox session.
+The portal bridge is separate from Geyser's built-in NetherNet support (`bedrock.transport` and
+`bedrock.signaling`), which lets players join by server address. The portal bridge uses Xbox
+signaling with the Broadcaster account's token, so players join through the published Xbox session.
 
-### Minimal paired configuration
+### The three forks
 
-Install this fork as `Geyser-Velocity.jar` in Velocity's `plugins` folder. In
-`config.yml`, set the portal bridge under `advanced.bedrock.portal-bridge`:
+Each README lists what its own fork changes. The setup guide for the whole stack is the
+[Broadcaster README](https://github.com/eofihbzefhzb/Broadcaster#setup).
+
+| Fork | Upstream | Role |
+|---|---|---|
+| [Broadcaster](https://github.com/eofihbzefhzb/Broadcaster) | [MCXboxBroadcast/Broadcaster](https://github.com/MCXboxBroadcast/Broadcaster) | Publishes the Xbox session players see in their friends list |
+| **Geyser** (this repo) | [GeyserMC/Geyser](https://github.com/GeyserMC/Geyser) | Runs the portal bridge, which accepts those players' NetherNet connections. Velocity only |
+| [NetworkCompatible](https://github.com/eofihbzefhzb/NetworkCompatible) | [Kas-tle/NetworkCompatible](https://github.com/Kas-tle/NetworkCompatible) | The NetherNet transport library the portal bridge is built on |
+
+### What this fork changes
+
+- **Config:** `advanced.bedrock.portal-bridge`, with `enabled`, `debug-logging`,
+  `nether-net-network-id`, `xbox-auth-header` and `xbox-auth-header-file`.
+- **Portal bridge** (`network/portal`): connects to Xbox signaling with the Minecraft token from
+  Broadcaster's `cache.json`, waiting up to 60 seconds for the file. It accepts NetherNet
+  connections through NetworkCompatible and hands each one to a normal Geyser session. Bedrock
+  encryption is skipped on these connections, since NetherNet already secures the link.
+- **Recovery:** a failed start is retried every 10 seconds at first, backing off to once a
+  minute. A token change reloads signaling (checked every 2 seconds), and a dropped signaling
+  websocket is rebound (checked every 5 seconds). Neither disconnects players already connected.
+- **Files for Broadcaster:** the NetherNet ID is kept across restarts in
+  `portal-nethernet-identities.json`. `portal-session-status.json` is written every 5 seconds with
+  that ID, readiness, MOTD and player counts, and removed on shutdown.
+- **Logging:** each NetherNet join is logged with the player's address, and a player who did not
+  get in with the step they reached. `debug-logging` adds every stage of a join.
+- **Integrated pack:** no longer forces resource packs on. Players may decline it unless
+  `force-resource-packs` is enabled.
+- **Build:** depends on the NetworkCompatible fork from JitPack, plus webrtc-java natives.
+  `release.yml` builds Velocity only, as numbered releases; upstream's `build.yml` runs only
+  when started by hand.
+
+### Minimal configuration
+
+Install `Geyser-Velocity.jar` from the
+[latest release](https://github.com/eofihbzefhzb/Geyser/releases/latest) in Velocity's `plugins`
+folder, then set in Geyser's `config.yml`:
 
 ```yaml
 advanced:
@@ -36,23 +67,11 @@ advanced:
       debug-logging: false
 ```
 
-The auth-file must be the MCXboxBroadcast cache on the same trusted machine.
-It is read without logging the token. Leave `nether-net-network-id` empty;
-Geyser generates/persists the active ID and writes an atomic
-`portal-session-status.json`. MCXboxBroadcast discovers that file and checks
-that it is ready and recent before publishing a session.
-
-Leave `external-network-id` empty in the MCXboxBroadcast config. Start
-Velocity/Geyser first, or within the publisher's
-`discovery-timeout-seconds` (120 by default): the publisher waits that long for
-`portal-session-status.json`, and Geyser retries its bind until the token is usable,
-so manual NetherNet ID copying is unnecessary.
-
-For requirements, the full publisher configuration and session visibility, see
-the companion [setup guide](https://github.com/eofihbzefhzb/Broadcaster#reliable-geyser--mcxboxbroadcast-setup).
-
-The tested companion artifact is available from the
-[NetherNet ingress release](https://github.com/eofihbzefhzb/Geyser/releases/latest).
+`xbox-auth-header-file` must be Broadcaster's cache on the same trusted machine; the token is
+never logged. Leave `nether-net-network-id` empty: Geyser generates the ID once, keeps it, and
+publishes it in `portal-session-status.json`, where Broadcaster reads it. Requirements, the
+Broadcaster configuration, session visibility and join diagnostics are in the
+[setup guide](https://github.com/eofihbzefhzb/Broadcaster#setup).
 
 ## What is Geyser?
 Geyser is a proxy, bridging the gap between Minecraft: Bedrock Edition and Minecraft: Java Edition servers.
