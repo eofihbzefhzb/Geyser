@@ -57,6 +57,11 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
     /** Geyser's own record of the network id to reuse on restart, so the Xbox identity stays stable. */
     private static final String IDENTITIES_FILENAME = "portal-nethernet-identities.json";
     private static final long STARTUP_RETRY_DELAY_SECONDS = 10;
+    /**
+     * How often the signaling websocket is checked. No player can join until a drop is noticed, and a
+     * rebind takes about a second, so this is most of the outage. The check itself only reads state.
+     */
+    private static final long SIGNALING_CHECK_INTERVAL_SECONDS = 5;
     /** Minimum gap between two attempts to rebind a dropped signaling websocket. */
     private static final long SIGNALING_REBIND_COOLDOWN_MS = 30_000;
 
@@ -233,7 +238,8 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
             this.statusWriterExecutor.execute(this::writeStatusFile);
             this.statusWriterExecutor.scheduleWithFixedDelay(this::writeStatusFile, 5, 5, TimeUnit.SECONDS);
             this.statusWriterExecutor.scheduleWithFixedDelay(this::reloadSignalingIfAuthChanged, 2, 2, TimeUnit.SECONDS);
-            this.statusWriterExecutor.scheduleWithFixedDelay(this::rebindSignalingIfDisconnected, 15, 15, TimeUnit.SECONDS);
+            this.statusWriterExecutor.scheduleWithFixedDelay(this::rebindSignalingIfDisconnected,
+                SIGNALING_CHECK_INTERVAL_SECONDS, SIGNALING_CHECK_INTERVAL_SECONDS, TimeUnit.SECONDS);
         }
     }
 
@@ -265,7 +271,7 @@ public final class PortalBridgeBootstrap implements AutoCloseable {
                 }
 
                 // Bounded retries. A rebind that fails because Xbox is unreachable would otherwise
-                // be retried every 15 seconds forever, and each attempt opens a websocket.
+                // be retried on every check forever, and each attempt opens a websocket.
                 long now = System.currentTimeMillis();
                 if (now - this.lastSignalingRebindAttempt < SIGNALING_REBIND_COOLDOWN_MS) {
                     return;
