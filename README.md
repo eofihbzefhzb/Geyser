@@ -45,8 +45,8 @@ Each README lists what its own fork changes. The setup guide for the whole stack
   that ID, readiness, MOTD and player counts, and removed on shutdown.
 - **Logging:** each NetherNet join is logged with the player's address, and a player who did not
   get in with the step they reached. `debug-logging` adds every stage of a join.
-- **Integrated pack:** no longer forces resource packs on. Players may decline it unless
-  `force-resource-packs` is enabled.
+- **Integrated pack:** enabling it no longer makes resource packs mandatory. Players may decline it
+  unless `force-resource-packs` is enabled.
 - **Build:** depends on the NetworkCompatible fork from JitPack, plus webrtc-java natives.
   `release.yml` builds Velocity only, as numbered releases; upstream's `build.yml` runs only
   when started by hand.
