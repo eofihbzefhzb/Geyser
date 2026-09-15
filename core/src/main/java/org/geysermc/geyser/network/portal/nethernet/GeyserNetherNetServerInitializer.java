@@ -32,8 +32,8 @@ import org.checkerframework.checker.nullness.qual.NonNull;
 import org.cloudburstmc.protocol.bedrock.BedrockPeer;
 import org.cloudburstmc.protocol.bedrock.BedrockServerSession;
 import org.geysermc.geyser.GeyserImpl;
-import org.geysermc.geyser.network.InvalidPacketHandler;
-import org.geysermc.geyser.network.UpstreamPacketHandler;
+import org.geysermc.geyser.network.bedrock.InvalidPacketHandler;
+import org.geysermc.geyser.network.bedrock.UpstreamPacketHandler;
 import org.geysermc.geyser.session.GeyserSession;
 
 import java.util.function.Supplier;

@@ -16,6 +16,11 @@ Geyser owns the Bedrock/NetherNet gameplay connection; MCXboxBroadcast only
 publishes the Xbox session. Do not run a second Bedrock relay for the same
 session.
 
+This ingress is separate from Geyser's own NetherNet support (`bedrock.transport` and
+`bedrock.signaling`), which lets players join by server address through built-in or external
+signaling. This one uses Xbox signaling, so players join from the friends list of an account in
+the published Xbox session.
+
 ### Minimal paired configuration
 
 Install this fork as `Geyser-Velocity.jar` in Velocity's `plugins` folder. In

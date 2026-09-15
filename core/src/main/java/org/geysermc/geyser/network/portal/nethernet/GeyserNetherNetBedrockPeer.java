@@ -30,7 +30,7 @@ import io.netty.channel.ChannelPipeline;
 import org.cloudburstmc.protocol.bedrock.BedrockSessionFactory;
 import org.cloudburstmc.protocol.bedrock.data.PacketCompressionAlgorithm;
 import org.cloudburstmc.protocol.bedrock.netty.codec.compression.CompressionStrategy;
-import org.geysermc.geyser.network.GeyserBedrockPeer;
+import org.geysermc.geyser.network.bedrock.GeyserBedrockPeer;
 import org.geysermc.geyser.network.portal.nethernet.codec.NetherNetCompressionDecoder;
 import org.geysermc.geyser.network.portal.nethernet.codec.NetherNetCompressionEncoder;
 import org.geysermc.geyser.network.portal.nethernet.codec.NetherNetPacketDecoder;
